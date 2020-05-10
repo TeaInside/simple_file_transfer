@@ -1,6 +1,10 @@
 # Simple File Transfer
 
-Create your own branch and do the following exercise in your own directory. Use TCP socket to do the following exercise.
+Create your own branch and do the following exercise in your own directory. Copy 000_template directory with your own username.
+
+```cp -rf 000_template <your_username>```
+
+Use TCP socket to do the following exercise.
 
 ### Data structure
 ```c
