@@ -32,7 +32,7 @@ typedef struct __attribute__((__packed__)) {
 5. Create the file (open file) in the `uploaded_files` directory with the name `char *filename;` (from the struct).
 6. If you have the content in the first read, write it to the opened file buffer.
 7. If the content is not complete, you have to read again from the client file descriptor, every read cycle you must write to the opened file buffer and reuse the buffer to read again from the client file descriptor, and so on until the file is transferred from client to server completely.
-8. Don't forget to close the file descriptor of the file and client.
+8. Don't forget to close the client and file file descriptor.
 
 ### Client Flows
 1. Must be able to connect to the server.
