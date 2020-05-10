@@ -130,15 +130,7 @@ static void handle_client(int client_fd)
 
   sprintf(target_file, "uploaded_files/%s", pkt->filename);
 
-  printf("\n\n\n\n");
   file_read_bytes = read_ok_bytes - FILE_INFO_SIZE;
-  printf("FILE_INFO_SIZE: %ld\n", FILE_INFO_SIZE);
-  printf("read_ok_bytes: %ld\n", read_ok_bytes);
-  printf("file_read_bytes: %ld\n", file_read_bytes);
-  printf("test min: %ld\n",  read_ok_bytes - FILE_INFO_SIZE);
-  printf("test plus: %ld\n", read_ok_bytes + FILE_INFO_SIZE);
-  printf("\n\n\n\n");
-
 
   printf("=== File Info ===\n");
   printf("Filename: \"%s\"\n", pkt->filename);
@@ -170,7 +162,6 @@ static void handle_client(int client_fd)
   /**
    * Receiving file...
    */
-  uint64_t i = 0;
   while (file_read_bytes < pkt->file_size) {
 
     /**
@@ -183,12 +174,6 @@ static void handle_client(int client_fd)
     }
 
     file_read_bytes += read_bytes;
-
-    if (i % 1000) {
-      printf("%ld\n", file_read_bytes);
-    }
-
-    i++;
 
     /**
      * Writing to file...

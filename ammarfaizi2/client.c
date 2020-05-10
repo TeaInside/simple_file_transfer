@@ -130,6 +130,8 @@ ask_file:
     sent_file_size += read_bytes;
   }
 
+  printf("Finished!\n");
+
 close_file:
   close(file_fd);
 
