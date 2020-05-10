@@ -40,7 +40,7 @@ typedef struct __attribute__((__packed__)) {
 7. Send the current struct to the server by writing to opened socket file descriptor.
 8. If the file size is greater than `READ_FILE_BUF`, you have to read it again with past buffer (reuse) and send it to the server until the file is completely sent.
 
-### Examples Scene of Work
+### Example Scenes of Work
 
 #### Run the server.
 ```
