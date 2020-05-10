@@ -3,7 +3,7 @@
 #define DATA_STRUCTURE_H
 
 #include <stdint.h>
-#define BUFFER_SIZE 1500
+#define BUFFER_SIZE 3000
 #define READ_FILE_BUF 2000
 typedef struct __attribute__((__packed__)) {
   uint8_t filename_len; // the length of filename.
