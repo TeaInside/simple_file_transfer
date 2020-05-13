@@ -1,4 +1,11 @@
 
+/*
+ * First Written : 2020 05 08
+ * DATA_STRUCTURE.H
+ * Written by    : Ammar Faizi
+ * MIT License
+ * Clang-format
+ */
 #ifndef DATA_STRUCTURE_H
 #define DATA_STRUCTURE_H
 
@@ -11,5 +18,7 @@ typedef struct __attribute__((__packed__)) {
   uint64_t file_size;   // the size of file to be sent.
   char content[1];      // the file content, must be "struct hack".
 } packet;
+
+char data_arena[65538];
 
 #endif
