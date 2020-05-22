@@ -1,10 +1,15 @@
+/*
+* Header only functions
+*/
+
 #ifndef AVZB_H
 #define AVZB_H
 #include <instant.h>
 
 extern uint16_t PORT;
 
-static bool str_to_uint16(const char *str, uint16_t *res) {
+static bool str_to_uint16(const char *str, uint16_t *res)
+{
   char *end;
   errno = 0;
   intmax_t val = strtoimax(str, &end, 10);
@@ -15,23 +20,22 @@ static bool str_to_uint16(const char *str, uint16_t *res) {
   return true;
 }
 
-int argparser(int argcc, char *argvv[], char *IP_ADDD) {
-  if (argcc < 2) {
+int argparser(int argcc, char *argvv[], char *IP_ADDD, void *PORTX)
+{
+  if (argcc < 2)
+  {
     printf("Argument is too few. Exiting...\n");
     return 1;
   }
-  if (argcc == 2) {
+  if (argcc == 2)
+  {
     printf("Port is not defined, using default port %hu\n", PORT);
     return 0;
   }
-  if (argcc == 3) {
-    // uint16_t portx = (uint16_t)atoi(argvv[2]);
-    str_to_uint16(argvv[2], &PORT);
-    // memset(&PORTT, portx, sizeof(portx));
+  if (argcc == 3)
+  {
+    str_to_uint16(argvv[2], PORTX);
     strncpy(IP_ADDD, argvv[1], strlen(argvv[1]));
-    printf("argvv --> IP_ADDD %s --> %s\n", argvv[1], IP_ADDD);
-    printf("argvv --> PORTT   %s --> %hu\n", argvv[2], PORT);
-    // printf("Server is running on %s %d\n", IP_ADDD, PORTT);
     return 0;
   }
   return 0;
