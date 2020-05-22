@@ -41,4 +41,18 @@ int argparser(int argcc, char *argvv[], char *IP_ADDD, void *PORTX)
   return 0;
 }
 
+uint64_t findfileSize(char f_n[])
+{
+  FILE *fp = fopen(f_n, "r"); // opening a file in read mode
+  if (fp == NULL)             // checking whether the file exists or not
+  {
+    printf("File Not Found!\n");
+    return -1;
+  }
+  fseek(fp, 0L, SEEK_END);
+  uint64_t res = ftell(fp); //counting the size of the file
+  fclose(fp);               //closing the file
+  return res;
+}
+
 #endif

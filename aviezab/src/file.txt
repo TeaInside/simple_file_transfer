@@ -1,0 +1,11 @@
+        if ((strncmp(pkt->data, "q", 1)) == 0)
+        {
+            // Reuse to be reply message from server
+            memset(pkt->data, 0, pkt->len);
+            read(sockfd, &pkt->len, sizeof(uint16_t));
+            read(sockfd, pkt->data, pkt->len);
+            printf("From Server (%d) : %s\n", pkt->len + 4, pkt->data);
+            memset(pkt->data, 0, pkt->len);
+            printf("Client Exit...\n");
+            break;
+        }
