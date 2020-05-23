@@ -10,7 +10,7 @@
 #include <instant.h>
 
 #define sockaddr struct sockaddr
-
+char data_arena[65538];
 uint16_t PORT = 9090;
 char IP_ADD[16] = "0.0.0.0";
 static int sockfd, clientfd;
@@ -39,7 +39,7 @@ int receive_file_content(int sockfdd)
     read_bytes = recv(sockfdd, ((char *)pkt) + read_ok_bytes, FILE_INFO_SIZE + BUFFER_SIZE, 0);
     if (read_bytes < 0)
     {
-      perror("Error recv(1)");
+      perror("!!>>> Error recv(1)");
       close(file_fd);
       return 1;
     }
@@ -49,12 +49,6 @@ int receive_file_content(int sockfdd)
   } while (read_ok_bytes < FILE_INFO_SIZE);
 
   snprintf(target_file, 512, "uploaded_files/%s", pkt->filename);
-  printf("=== File Info ===\n");
-  printf("Filename: \"%s\"\n", pkt->filename);
-  printf("File size: %ld\n", pkt->file_size);
-  printf("=====================\n");
-  printf("The file will be stored at: \"%s\"\n", target_file);
-  printf("Waiting for file...\n");
 
   file_read_bytes = read_ok_bytes - FILE_INFO_SIZE;
 
@@ -70,23 +64,24 @@ int receive_file_content(int sockfdd)
   file_fd = open(target_file, O_CREAT | O_WRONLY, S_IRWXU | S_IRGRP | S_IROTH);
   if (file_fd < 0)
   {
-    perror("Error open (1)");
-    printf("Cannot create file: \"%s\"\n", target_file);
+    perror("!!>>> Error open (1)");
+    printf("!!>>> Cannot create file: \"%s\"\n", target_file);
     close(file_fd);
     return 2;
   }
   /**
    * Write some received data.
+   * This time is only for initiating the file after received
    */
   write_bytes = write(file_fd, pkt->content, file_read_bytes);
   if (write_bytes < 0)
   {
-    perror("Error write (1)");
+    perror("!!>>> Error write (1)");
     close(file_fd);
     return 3;
   }
 
-  printf("Receiving file...\n");
+  printf(">>>>> Receiving file...\n");
 
   /**
    * Receiving file...
@@ -100,7 +95,7 @@ int receive_file_content(int sockfdd)
     read_bytes = recv(sockfdd, pkt->content, BUFFER_SIZE, 0);
     if (read_bytes < 0)
     {
-      perror("Error recv(2)");
+      perror("!!>>> Error recv(2)");
       close(file_fd);
       return 1;
     }
@@ -113,86 +108,13 @@ int receive_file_content(int sockfdd)
     write_bytes = write(file_fd, pkt->content, read_bytes);
     if (write_bytes < 0)
     {
-      perror("Error write (2)");
+      perror("!!>>> Error write (2)");
       close(file_fd);
       return 3;
     }
   }
 
   printf("File received completely!\n\n");
-  return 0;
-}
-
-int receive_filename_char(int sockfdd)
-{
-
-  printf(">>>>> Server is receiving filename information ...\n");
-
-  if (recv(sockfdd, &pkt->filename, pkt->filename_len, 0))
-  {
-    printf(">>>>> Filename info: %s\n", pkt->filename);
-
-    return 0;
-  }
-  else
-  {
-    return 1;
-  }
-}
-
-int receive_filename_len(int sockfdd)
-{
-  uint8_t ulang = 1;
-ulang_rcv_fl:
-  pkt->filename_len = 0;
-  for (;;)
-  {
-    printf(">>>>> Server is receiving filename length information ...\n");
-    recv(sockfdd, &pkt->filename_len, sizeof(pkt), 0);
-    printf(">>>>> Filename length info: %hhu\n", pkt->filename_len);
-    break;
-  }
-  if (pkt->filename_len == 0)
-  {
-    if (ulang != 3)
-    {
-      printf("!>>>> Filename length is zero. Repeating the process until 3 times..\n");
-      ulang++;
-      goto ulang_rcv_fl;
-    }
-    else
-    {
-      return 1;
-    }
-  }
-  return 0;
-}
-
-int receive_file_size(int sockfdd)
-{
-  uint8_t ulang = 1;
-ulang_rcv_fs:
-  pkt->file_size = 0;
-  for (;;)
-  {
-    printf(">>>>> Server is receiving file size information ...\n");
-    recv(sockfdd, &pkt->file_size, sizeof(pkt), 0);
-    printf(">>>>> Filesize info: %lu\n", pkt->file_size);
-    break;
-  }
-  if (pkt->file_size == 0)
-  {
-    if (ulang != 3)
-    {
-      printf("!>>> Filesize info is zero. Repeating the process until 3 times..\n");
-      ulang++;
-      goto ulang_rcv_fs;
-    }
-    else
-    {
-      return 1;
-    }
-  }
   return 0;
 }
 
@@ -245,69 +167,8 @@ int server_socket_create(int sockfdd)
     printf(">>>>> Server acccepts the Client...\n");
   int status_server = 0;
 
-  #if 0
-  for (;;)
-  {
-    status_server = receive_file_size(clientfd);
-    if (status_server == 0)
-    {
-      break;
-    }
-    else
-    {
-      printf("!!>>> Error at receive_file_size\n");
-      break;
-    }
-  }
-  for (;;)
-  {
-    status_server = receive_filename_len(clientfd);
-    if (status_server == 0)
-    {
-      break;
-    }
-    else
-    {
-      printf("!!>>> Error at receive_filename_len\n");
-      break;
-    }
-  }
-  for (;;)
-  {
-    status_server = receive_filename_char(clientfd);
-    if (status_server == 0)
-    {
-      break;
-    }
-    else
-    {
-      printf("!!>>> Error at receive_filename_char\n");
-      break;
-    }
-  }
+  status_server = receive_file_content(clientfd);
 
-  for (;;)
-  {
-    status_server = receive_file_content(clientfd);
-    if (status_server == 0)
-    {
-      break;
-    }
-    else
-    {
-      printf("!!>>> Error at receive_file_content\n");
-      break;
-    }
-  }
-  #endif
-
-/* correction block */
-{
-
-
-  receive_file_content(clientfd);
-}
-/* end of correction block. */
   return status_server;
 }
 

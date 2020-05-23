@@ -41,7 +41,7 @@ int argparser(int argcc, char *argvv[], char *IP_ADDD, void *PORTX)
   return 0;
 }
 
-uint64_t findfileSize(char f_n[])
+int64_t findfileSize(char f_n[])
 {
   FILE *fp = fopen(f_n, "r"); // opening a file in read mode
   if (fp == NULL)             // checking whether the file exists or not

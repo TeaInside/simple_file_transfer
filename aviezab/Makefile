@@ -6,13 +6,12 @@
 #  * Clang-format
 # */
 
-# CC=clang
-# ifeq (, $(shell which clang))
-# $(error "No clang in $(PATH), using gcc")
-# CC=gcc
-# endif
-
+# Do not change this, I love LLVM
+CC=clang
+ifeq (, $(shell which clang))
+$(error "No clang in $(PATH), using gcc")
 CC=gcc
+endif
 
 all:
 	$(CC) src/client.c -o client.elf -I./include
