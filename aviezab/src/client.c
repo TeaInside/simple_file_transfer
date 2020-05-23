@@ -17,6 +17,25 @@ static struct sockaddr_in server_addr; //, client_addr;
 static unsigned int len;
 static packet *pkt = (packet *)&data_arena;
 
+int send_file_content(int sockfdd, char filepath[])
+{
+    FILE *file = NULL;
+    //unsigned char buffer[1024]; // array of bytes, not pointers-to-bytes
+    size_t bytesRead = 0;
+    file = fopen(filepath, "rb");
+    if (file != NULL)
+    {
+        // read up to sizeof(buffer) bytes
+        // selama bytes dibaca lebih dari 0, tandanya belum selesai kirim.
+        while ((bytesRead = fread(pkt->content, 1, sizeof(pkt->content), file)) > 0)
+        {
+            send(sockfdd, pkt->content, sizeof(pkt->content), 0);
+            printf("%s", pkt->content);
+        }
+    }
+    return 0;
+}
+
 int send_filename_char(int sockfdd, char filepath[])
 {
 
@@ -47,7 +66,7 @@ int send_filename_len(int sockfdd, char filepath[])
     for (;;)
     {
         printf(">>>>> Client is sending filename length information ...\n");
-        send(sockfdd, &pkt->filename_len, sizeof(pkt), 0);
+        send(sockfdd, &pkt->filename_len, sizeof(pkt->filename_len), 0);
         printf(">>>>> Filename info: %hhu\n", pkt->filename_len);
         break;
     }
@@ -68,7 +87,7 @@ int send_file_size(int sockfdd, char filepath[])
     for (;;)
     {
         printf(">>>>> Client is sending file size information ...\n");
-        send(sockfdd, &pkt->file_size, sizeof(pkt), 0);
+        send(sockfdd, &pkt->file_size, sizeof(pkt->file_size), 0);
         printf(">>>>> Filesize info: %lu\n", pkt->file_size);
         break;
     }
@@ -137,6 +156,19 @@ int client_socket_create(int sockfdd)
         }
     }
 
+    for (;;)
+    {
+        status_client = send_file_content(sockfdd, pkt->filename);
+        if (status_client == 0)
+        {
+            break;
+        }
+        else
+        {
+            printf("!!>>> Error at send_file_content\n");
+            break;
+        }
+    }
     return status_client;
 }
 

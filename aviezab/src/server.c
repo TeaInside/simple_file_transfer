@@ -18,6 +18,43 @@ static struct sockaddr_in server_addr, client_addr;
 static unsigned int len;
 static packet *pkt = (packet *)&data_arena;
 
+int receive_file_content(int sockfdd)
+{
+  //FILE *file = NULL;
+  int file;
+  char target[512];
+  snprintf(target, 512, "uploaded_files/%s", pkt->filename);
+  printf("Saving to: %s ...", target);
+  file = open(target, O_CREAT | O_WRONLY, S_IRUSR | S_IWUSR);
+  if (file == -1)
+  {
+    perror("Couldn't open file");
+    return 1;
+  }
+  printf(">>>>> Server is receiving file content ...\n");
+  ssize_t bytesRead = 1;
+  ssize_t bytesSent = 0;
+  while (bytesRead > 0)
+  {
+    bytesRead = recv(sockfdd, &pkt->content, pkt->file_size, 0);
+    if (bytesRead == 0)
+    {
+      break;
+    }
+    //printf(">>>>> File chunk received: %zu\n", bytesRead);
+    printf(".");
+    bytesSent = write(file, pkt->content, bytesRead);
+    if (bytesSent < 0)
+    {
+      perror("!!>>> Failed to save file");
+      close(file);
+      return 2;
+    }
+  }
+  close(file);
+  return 0;
+}
+
 int receive_filename_char(int sockfdd)
 {
 
@@ -175,6 +212,20 @@ int server_socket_create(int sockfdd)
     else
     {
       printf("!!>>> Error at receive_filename_char\n");
+      break;
+    }
+  }
+
+  for (;;)
+  {
+    status_server = receive_file_content(clientfd);
+    if (status_server == 0)
+    {
+      break;
+    }
+    else
+    {
+      printf("!!>>> Error at receive_file_content\n");
       break;
     }
   }
