@@ -17,6 +17,7 @@ static struct sockaddr_in server_addr; //, client_addr;
 static unsigned int len;
 static packet *pkt = (packet *)&data_arena;
 
+#if 0
 int send_file_content(int sockfdd, char filepath[])
 {
     int file_fd;
@@ -132,6 +133,7 @@ int send_file_size(int sockfdd, char filepath[])
     }
     return 0;
 }
+#endif
 
 int client_socket_create(int sockfdd)
 {
@@ -155,7 +157,10 @@ int client_socket_create(int sockfdd)
     else
         printf(">>>>> Connected to the server..\n");
     int status_client = 0;
-    for (;;)
+
+   /* Too many overhead, you should send filename, filename_len, and file size at once. */
+   #if 0
+   for (;;)
     {
         status_client = send_file_size(sockfdd, pkt->filename);
         if (status_client == 0)
@@ -194,21 +199,132 @@ int client_socket_create(int sockfdd)
             break;
         }
     }
+    #endif
 
-    for (;;)
+    /* Why do you use for loop to do this?
+       It will never have more than one cycle. */
+    // for (;;)
+    // {
+    //     status_client = send_file_content(sockfdd, pkt->filename);
+    //     if (status_client == 0)
+    //     {
+    //         break;
+    //     }
+    //     else
+    //     {
+    //         printf("!!>>> Error at send_file_content\n");
+    //         break;
+    //     }
+    // }
+
+
+#define FIRST_SEND_BYTES         \
+    sizeof(pkt->filename_len) +  \
+        sizeof(pkt->filename) +  \
+        sizeof(pkt->file_size) + \
+        file_read_bytes
+
+#define FIRST_READ_BYTES 4096
+
+/* rblock */
+{
+    int ret;
+    struct stat st;
+    ssize_t send_ret, read_ret;
+    uint64_t file_read_bytes = 0;
+
+    int file_fd = open(pkt->filename, O_RDONLY);
+    if (file_fd < 0) {
+        perror("open()");
+        printf("Cannot open file: %s\n", pkt->filename);
+        return -1;
+    }
+
+    /* Debug only. */
+    #if 1
+    printf("pkt->filename = %s\n", pkt->filename);
+    printf("pkt->filename_len = %d\n", pkt->filename_len);
+    printf("pkt->file_size = %ld\n", pkt->file_size);
+    #endif
+
+
+    /* Read file. */
     {
-        status_client = send_file_content(sockfdd, pkt->filename);
-        if (status_client == 0)
-        {
-            break;
+        /* Get file size. */
+        if (fstat(file_fd, &st) < 0) {
+            perror("fstat()");
+            printf("Cannot stat file: %s\n", pkt->filename);
+            ret = -1;
+            goto close_file;
         }
-        else
-        {
-            printf("!!>>> Error at send_file_content\n");
-            break;
+        pkt->file_size = st.st_size;
+
+        /* Read head of file. */
+        read_ret = read(file_fd, pkt->content, FIRST_READ_BYTES);
+        if (read_ret < 0) {
+            perror("read()");
+            printf("Error while reading file: %s\n", pkt->filename);
+            ret = -1;
+            goto close_file;
+        }
+
+        /* We have read read_ret bytes. */
+        file_read_bytes += (uint64_t)read_ret;
+    }
+
+    /* Send file information. */
+    {
+        send_ret = send(sockfdd, pkt, FIRST_SEND_BYTES, 0);
+        if (send_ret < 0) {
+            perror("send()");
+            printf("Error while sending file information\n");
+            ret = -1;
+            goto close_file;
         }
     }
-    return status_client;
+
+    /* Send the rest of file content. */
+    {
+        while (file_read_bytes < pkt->file_size) {
+
+            /* Read file content. */
+            read_ret = read(file_fd, pkt->content, FIRST_READ_BYTES);
+            if (read_ret < 0) {
+                perror("read()");
+                printf("Error while reading file: %s\n", pkt->filename);
+                ret = -1;
+                goto close_file;
+            }
+
+            /* Send it to the server. */
+            send_ret = send(sockfdd, pkt->content, read_ret, 0);
+            if (send_ret < 0) {
+                perror("send()");
+                printf("Error while sending file content\n");
+                ret = -1;
+                goto close_file;
+            }
+
+            file_read_bytes += (uint64_t)read_ret;
+        }
+    }
+
+
+
+
+    if (send_ret < 0) {
+        perror("Error send()");
+        return -1;
+    }
+
+close_file:
+    close(file_fd);
+ret:
+    return ret;
+}
+/* end of rblock */
+
+    // return status_client;
 }
 
 int main(int argc, char *argv[], char *envp[])

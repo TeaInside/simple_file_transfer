@@ -6,11 +6,13 @@
 #  * Clang-format
 # */
 
-CC=clang
-ifeq (, $(shell which clang))
-$(error "No clang in $(PATH), using gcc")
+# CC=clang
+# ifeq (, $(shell which clang))
+# $(error "No clang in $(PATH), using gcc")
+# CC=gcc
+# endif
+
 CC=gcc
-endif
 
 all:
 	$(CC) src/client.c -o client.elf -I./include
