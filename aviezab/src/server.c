@@ -29,13 +29,6 @@ int receive_file_content(int sockfdd)
   char target_file[512];
   ssize_t read_bytes = 0, write_bytes = 0;
   size_t file_read_bytes = 0, read_ok_bytes = 0;
-  snprintf(target_file, 512, "uploaded_files/%s", pkt->filename);
-  printf("=== File Info ===\n");
-  printf("Filename: \"%s\"\n", pkt->filename);
-  printf("File size: %ld\n", pkt->file_size);
-  printf("=====================\n");
-  printf("The file will be stored at: \"%s\"\n", target_file);
-  printf("Waiting for file...\n");
 
   /**
    * Receive file info.
@@ -43,7 +36,6 @@ int receive_file_content(int sockfdd)
    */
   do
   {
-
     read_bytes = recv(sockfdd, ((char *)pkt) + read_ok_bytes, FILE_INFO_SIZE + BUFFER_SIZE, 0);
     if (read_bytes < 0)
     {
@@ -55,6 +47,14 @@ int receive_file_content(int sockfdd)
     read_ok_bytes += (size_t)read_bytes;
 
   } while (read_ok_bytes < FILE_INFO_SIZE);
+
+  snprintf(target_file, 512, "uploaded_files/%s", pkt->filename);
+  printf("=== File Info ===\n");
+  printf("Filename: \"%s\"\n", pkt->filename);
+  printf("File size: %ld\n", pkt->file_size);
+  printf("=====================\n");
+  printf("The file will be stored at: \"%s\"\n", target_file);
+  printf("Waiting for file...\n");
 
   file_read_bytes = read_ok_bytes - FILE_INFO_SIZE;
 
@@ -244,6 +244,8 @@ int server_socket_create(int sockfdd)
   else
     printf(">>>>> Server acccepts the Client...\n");
   int status_server = 0;
+
+  #if 0
   for (;;)
   {
     status_server = receive_file_size(clientfd);
@@ -297,7 +299,15 @@ int server_socket_create(int sockfdd)
       break;
     }
   }
+  #endif
 
+/* correction block */
+{
+
+
+  receive_file_content(clientfd);
+}
+/* end of correction block. */
   return status_server;
 }
 
