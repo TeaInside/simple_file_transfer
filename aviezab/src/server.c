@@ -18,6 +18,23 @@ static struct sockaddr_in server_addr, client_addr;
 static unsigned int len;
 static packet *pkt = (packet *)&data_arena;
 
+int receive_filename_char(int sockfdd)
+{
+
+  printf(">>>>> Server is receiving filename information ...\n");
+
+  if (recv(sockfdd, &pkt->filename, pkt->filename_len, 0))
+  {
+    printf(">>>>> Filename info: %s\n", pkt->filename);
+
+    return 0;
+  }
+  else
+  {
+    return 1;
+  }
+}
+
 int receive_filename_len(int sockfdd)
 {
   uint8_t ulang = 1;
@@ -145,6 +162,19 @@ int server_socket_create(int sockfdd)
     else
     {
       printf("!!>>> Error at receive_filename_len\n");
+      break;
+    }
+  }
+  for (;;)
+  {
+    status_server = receive_filename_char(clientfd);
+    if (status_server == 0)
+    {
+      break;
+    }
+    else
+    {
+      printf("!!>>> Error at receive_filename_char\n");
       break;
     }
   }

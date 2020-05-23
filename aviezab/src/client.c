@@ -17,6 +17,22 @@ static struct sockaddr_in server_addr; //, client_addr;
 static unsigned int len;
 static packet *pkt = (packet *)&data_arena;
 
+int send_filename_char(int sockfdd, char filepath[])
+{
+
+    printf(">>>>> Client is sending filename information ...\n");
+    if (send(sockfdd, &pkt->filename, sizeof(pkt->filename), 0))
+    {
+        printf(">>>>> Filename info: %s\n", pkt->filename);
+
+        return 0;
+    }
+    else
+    {
+        return 1;
+    }
+}
+
 int send_filename_len(int sockfdd, char filepath[])
 {
     ssize_t fs = strlen(filepath);
@@ -107,6 +123,19 @@ int client_socket_create(int sockfdd)
             break;
         }
     }
+    for (;;)
+    {
+        status_client = send_filename_char(sockfdd, pkt->filename);
+        if (status_client == 0)
+        {
+            break;
+        }
+        else
+        {
+            printf("!!>>> Error at send_filename_char\n");
+            break;
+        }
+    }
 
     return status_client;
 }
@@ -127,6 +156,7 @@ int main(int argc, char *argv[], char *envp[])
         fgets(pkt->filename, 255, stdin);
         pkt->filename_len = strlen(pkt->filename) - 1;
         pkt->filename[pkt->filename_len] = '\0';
+        printf("%s", pkt->filename);
         ssize_t fs = findfileSize(pkt->filename);
         if (fs >= 0)
         {
