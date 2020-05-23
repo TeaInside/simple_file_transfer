@@ -17,41 +17,109 @@ static int sockfd, clientfd;
 static struct sockaddr_in server_addr, client_addr;
 static unsigned int len;
 static packet *pkt = (packet *)&data_arena;
+#define FILE_INFO_SIZE            \
+  (size_t)(                       \
+      sizeof(pkt->filename_len) + \
+      sizeof(pkt->filename) +     \
+      sizeof(pkt->file_size))
 
 int receive_file_content(int sockfdd)
 {
-  //FILE *file = NULL;
-  int file;
-  char target[512];
-  snprintf(target, 512, "uploaded_files/%s", pkt->filename);
-  printf("Saving to: %s ...", target);
-  file = open(target, O_CREAT | O_WRONLY, S_IRUSR | S_IWUSR);
-  if (file == -1)
+  int file_fd;
+  char target_file[512];
+  ssize_t read_bytes = 0, write_bytes = 0;
+  size_t file_read_bytes = 0, read_ok_bytes = 0;
+  snprintf(target_file, 512, "uploaded_files/%s", pkt->filename);
+  printf("=== File Info ===\n");
+  printf("Filename: \"%s\"\n", pkt->filename);
+  printf("File size: %ld\n", pkt->file_size);
+  printf("=====================\n");
+  printf("The file will be stored at: \"%s\"\n", target_file);
+  printf("Waiting for file...\n");
+
+  /**
+   * Receive file info.
+   * Make sure file info is completely received before processing file.
+   */
+  do
   {
-    perror("Couldn't open file");
-    return 1;
-  }
-  printf(">>>>> Server is receiving file content ...\n");
-  ssize_t bytesRead = 1;
-  ssize_t bytesSent = 0;
-  while (bytesRead > 0)
+
+    read_bytes = recv(sockfdd, ((char *)pkt) + read_ok_bytes, FILE_INFO_SIZE + BUFFER_SIZE, 0);
+    if (read_bytes < 0)
+    {
+      perror("Error recv(1)");
+      close(file_fd);
+      return 1;
+    }
+
+    read_ok_bytes += (size_t)read_bytes;
+
+  } while (read_ok_bytes < FILE_INFO_SIZE);
+
+  file_read_bytes = read_ok_bytes - FILE_INFO_SIZE;
+
+  printf("=== File Info ===\n");
+  printf("Filename: \"%s\"\n", pkt->filename);
+  printf("File size: %ld\n", pkt->file_size);
+  printf("=====================\n");
+  printf("The file will be stored at: \"%s\"\n", target_file);
+
+  /**
+   * Create and open file.
+   */
+  file_fd = open(target_file, O_CREAT | O_WRONLY, S_IRWXU | S_IRGRP | S_IROTH);
+  if (file_fd < 0)
   {
-    bytesRead = recv(sockfdd, &pkt->content, pkt->file_size, 0);
-    if (bytesRead == 0)
+    perror("Error open (1)");
+    printf("Cannot create file: \"%s\"\n", target_file);
+    close(file_fd);
+    return 2;
+  }
+  /**
+   * Write some received data.
+   */
+  write_bytes = write(file_fd, pkt->content, file_read_bytes);
+  if (write_bytes < 0)
+  {
+    perror("Error write (1)");
+    close(file_fd);
+    return 3;
+  }
+
+  printf("Receiving file...\n");
+
+  /**
+   * Receiving file...
+   */
+  while (file_read_bytes < pkt->file_size)
+  {
+
+    /**
+     * Reading from socket...
+     */
+    read_bytes = recv(sockfdd, pkt->content, BUFFER_SIZE, 0);
+    if (read_bytes < 0)
     {
-      break;
+      perror("Error recv(2)");
+      close(file_fd);
+      return 1;
     }
-    //printf(">>>>> File chunk received: %zu\n", bytesRead);
-    printf(".");
-    bytesSent = write(file, pkt->content, bytesRead);
-    if (bytesSent < 0)
+
+    file_read_bytes += read_bytes;
+
+    /**
+     * Writing to file...
+     */
+    write_bytes = write(file_fd, pkt->content, read_bytes);
+    if (write_bytes < 0)
     {
-      perror("!!>>> Failed to save file");
-      close(file);
-      return 2;
+      perror("Error write (2)");
+      close(file_fd);
+      return 3;
     }
   }
-  close(file);
+
+  printf("File received completely!\n\n");
   return 0;
 }
 

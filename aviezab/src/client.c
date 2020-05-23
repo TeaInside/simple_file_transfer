@@ -19,24 +19,63 @@ static packet *pkt = (packet *)&data_arena;
 
 int send_file_content(int sockfdd, char filepath[])
 {
-    FILE *file = NULL;
-    //unsigned char buffer[1024]; // array of bytes, not pointers-to-bytes
-    size_t bytesRead = 0;
-    file = fopen(filepath, "rb");
-    if (file != NULL)
+    int file_fd;
+    ssize_t read_bytes, write_bytes;
+    uint64_t sent_file_size = 0;
+    file_fd = open(filepath, O_RDONLY);
+    if (file_fd < 0)
     {
-        // read up to sizeof(buffer) bytes
-        // selama bytes dibaca lebih dari 0, tandanya belum selesai kirim.
-        while ((bytesRead = fread(pkt->content, 1, sizeof(pkt->content), file)) > 0)
-        {
-            send(sockfdd, pkt->content, sizeof(pkt->content), 0);
-            printf("%s", pkt->content);
-        }
+        printf("!!>>> Cannot open file!\n");
+        return 1;
     }
+
+    read_bytes = read(file_fd, pkt->content,
+                      (READ_FILE_BUF > pkt->file_size) ? pkt->file_size : READ_FILE_BUF);
+    if (read_bytes < 0)
+    {
+        perror("!!>>> Error read(1)");
+        return 2;
+    }
+
+#define FIRST_SEND_BYTES         \
+    sizeof(pkt->filename_len) +  \
+        sizeof(pkt->filename) +  \
+        sizeof(pkt->file_size) + \
+        read_bytes
+
+    write_bytes = send(sockfdd, pkt, FIRST_SEND_BYTES, 0);
+    if (write_bytes < 0)
+    {
+        perror("!!>> Error send(1)");
+        return 3;
+    }
+
+    sent_file_size += read_bytes;
+
+    while (sent_file_size < (pkt->file_size))
+    {
+        read_bytes = read(file_fd, pkt->content, READ_FILE_BUF);
+        if (read_bytes < 0)
+        {
+            perror("!!>>> Error read(2)");
+            return 2;
+            break;
+        }
+        write_bytes = send(sockfdd, pkt->content, read_bytes, 0);
+        if (write_bytes < 0)
+        {
+            perror("!!>>> Error send(2)");
+            return 3;
+            break;
+        }
+        sent_file_size += read_bytes;
+    }
+
+    printf("Finished!\n");
     return 0;
 }
 
-int send_filename_char(int sockfdd, char filepath[])
+int send_filename_char(int sockfdd)
 {
 
     printf(">>>>> Client is sending filename information ...\n");
@@ -144,7 +183,7 @@ int client_socket_create(int sockfdd)
     }
     for (;;)
     {
-        status_client = send_filename_char(sockfdd, pkt->filename);
+        status_client = send_filename_char(sockfdd);
         if (status_client == 0)
         {
             break;
