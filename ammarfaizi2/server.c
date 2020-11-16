@@ -180,6 +180,7 @@ file_server(char *bind_addr, uint16_t bind_port)
 
 
   /* Add interrupt and terminate handler. */
+  signal(SIGHUP, interrupt_handler);
   signal(SIGINT, interrupt_handler);
   signal(SIGTERM, interrupt_handler);
 
@@ -324,7 +325,7 @@ event_loop(int net_fd)
           if (unlikely(close_con)) {
             size_t copy_siz = (free_idx - 1) - i;
 
-            if (copy_siz > 0) {
+            if (likely(copy_siz > 0)) {
               memmove(clfd, &(clfd[1]), copy_siz * sizeof(pollfd_t));
               memmove(task, &(task[1]), copy_siz * sizeof(con_task_t));
             }
@@ -341,7 +342,7 @@ event_loop(int net_fd)
   }
 
 clean_up:
-  if (tasks != NULL) {
+  if (likely(tasks != NULL)) {
     for (size_t i = 0; i < free_idx; i++) {
       if (tasks[i].is_used) {
         void *claddr = (void *)&(tasks[i].cli_addr);
@@ -428,7 +429,7 @@ accept_cli(
 
   printf("Accepting connection from %s:%d...\n", HP_CC(cli_addr));
 
-  if (init_task(cli_fd, task)) {
+  if (likely(init_task(cli_fd, task))) {
     pfd->fd      = cli_fd;
     pfd->events  = POLLIN;
     pfd->revents = 0;
@@ -465,7 +466,7 @@ init_task(int cli_fd, con_task_t *task)
   const size_t fbuf_siz = FILE_BUFFER_SIZ;
 
   heap = malloc(pkt_siz + fbuf_siz);
-  if (heap == NULL) {
+  if (unlikely(heap == NULL)) {
     printf("Error: cannot allocate memory for a new task\n");
     return false;
   }
@@ -547,7 +548,7 @@ handle_task(pollfd_t *clfd, con_task_t *task, bool *close_con)
 
       if (unlikely(task->fhandle == NULL)) {
 
-        if (!open_fhandle(task)) {
+        if (unlikely(!open_fhandle(task))) {
           goto close_cli;
         }
 
@@ -568,9 +569,6 @@ handle_task(pollfd_t *clfd, con_task_t *task, bool *close_con)
         /* Write the file. */
         fwrite(pkt->content, fwrite_siz, sizeof(char), fhandle);
       }
-
-      printf("file_size: %ld\n", pkt->file_size);
-      printf("content_siz: %ld\n", content_siz);
 
       if (unlikely(pkt->file_size <= content_siz)) {
         printf("File received completely!\n");
@@ -631,7 +629,7 @@ open_fhandle(con_task_t *task)
       return false;
     }
 
-    fhandle       = fdopen(fd, "wb");
+    fhandle = fdopen(fd, "wb");
     if (unlikely(fhandle == NULL)) {
       printf("Error: cannot load file descriptor to fdopen (%d)\n", fd);
       close(fd);
