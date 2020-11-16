@@ -47,11 +47,8 @@
 #  error Compiler is not supported!
 #endif
 
-
-
-#define HP_CC(CLI_PTR)                                    \
-  inet_ntoa(((struct sockaddr_in *)(CLI_PTR))->sin_addr), \
-  ntohs(((struct sockaddr_in *)(CLI_PTR))->sin_port)
+#define HP_CC(CLI_PTR) inet_ntoa((CLI_PTR)->sin_addr), \
+                       ntohs((CLI_PTR)->sin_port)
 
 /* Connection task struct. */
 typedef struct _con_task
@@ -60,11 +57,13 @@ typedef struct _con_task
   int                cli_fd;   /* Client file descriptor.             */
   size_t             cpos;     /* Count position.                     */
   size_t             clen;     /* Count length.                       */
+#if defined(__linux__)
+  int                file_fd;  /* To support open O_NONBLOCK fd.      */
+#endif
   char               *fbuf;    /* File buffer to reduce write syscall.*/
   FILE               *fhandle; /* To do file operation by using stdio.*/
   packet             *pkt;     /* The packet structure.               */
   struct sockaddr_in cli_addr; /* Client IPv4 address.                */
-  void               *heap;    /* State to save single shared malloc. */
 } con_task_t;
 
 typedef struct pollfd pollfd_t;
@@ -88,18 +87,19 @@ accept_cli(
 );
 
 inline static bool
-handle_task(pollfd_t *clfd, con_task_t *task, bool *close_con);
+handle_task(
+  size_t      *_i,
+  pollfd_t    *clfd,
+  con_task_t  *task,
+  size_t      *free_idx,
+  nfds_t      *nfds
+);
 
 inline static bool
 init_task(int cli_fd, con_task_t *task);
 
 inline static bool
 open_fhandle(con_task_t *task);
-
-inline static int
-setup_socket(int net_fd);
-
-static const short pfbits = (POLLIN | POLLHUP | POLLERR | POLLNVAL);
 
 bool stop = false;
 
@@ -141,13 +141,6 @@ file_server(char *bind_addr, uint16_t bind_port)
     /* No need to close net_fd as it fails to create. */
     return 1;
   }
-
-
-  if (setup_socket(net_fd) < 0) {
-    retval = 1;
-    goto close_net_fd;
-  }
-
 
   /*
    * Prepare server bind address data.
@@ -202,29 +195,6 @@ close_net_fd:
  * @param int net_fd
  * @return int
  */
-inline static int
-setup_socket(int net_fd)
-{
-  int val = 1;
-
-  #define SET_X(FD, LEVEL, OPT, VAL, LENP)              \
-    if (setsockopt(FD, LEVEL, OPT, VAL, LENP) < 0) {    \
-      printf("Error: setsockopt(%s, %s): \"%s\"\n",     \
-             #OPT, #VAL, strerror(errno));              \
-      return -1;                                        \
-    }
-
-  SET_X(net_fd, SOL_SOCKET, SO_REUSEADDR, &val, sizeof(int));
-
-
-  return 0;
-}
-
-
-/**
- * @param int net_fd
- * @return int
- */
 static int
 event_loop(int net_fd)
 {
@@ -245,18 +215,15 @@ event_loop(int net_fd)
     goto clean_up;
   }
 
-
   tasks = (con_task_t *)malloc(tasks_siz);
   if (tasks == NULL) {
     printf("Error: cannot allocate memory for tasks\n");
     goto clean_up;
   }
 
-
   /* Zero the arrays. */
   memset(fds, 0, fds_siz);
   memset(tasks, 0, tasks_siz);
-
 
   /* Plug socket file descriptor to poll queue. */
   fds[0].fd      = net_fd;
@@ -265,12 +232,12 @@ event_loop(int net_fd)
   nfds           = 1;
 
   /* Poll queue for the clients' file descriptor as array. */
-  clfds          = &(fds[1]);
-
+  clfds         = &(fds[1]);
 
   /* The event loop goes here. */
   while (true) {
-    int  rv;      /* Return value of poll(). */
+    int  rv;      /* Return value of poll()       */
+    bool acc_ret; /* Return value of accept_cli() */
 
     /*
      * Notice that the poll will return the number of ready file
@@ -285,12 +252,8 @@ event_loop(int net_fd)
     rv = poll(fds, nfds, timeout);
 
     if (unlikely(rv < 0)) {
-      if (errno == EINTR) {
-        ret = 0;
-      } else {
-        printf("Error poll: %s\n", strerror(errno));
-      }
-      goto clean_up;
+      printf("Error poll: %s\n", strerror(errno));
+      break;
     }
 
     if (unlikely(rv == 0)) {
@@ -301,42 +264,25 @@ event_loop(int net_fd)
       continue;
     }
 
-    if (unlikely(accept_cli(fds, clfds, tasks, &free_idx, &nfds))) {
-      rv--;
+    acc_ret = accept_cli(fds, clfds, tasks, &free_idx, &nfds);
+    if (unlikely(acc_ret)) {
+      /* If rv is zero, there are no other ready file descriptors. */
+      if (--rv) continue;
     }
-
 
     if (unlikely(stop)) {
-      goto clean_up;
+      break;
     }
 
-
-    for (size_t i = 0; (rv > 0) && (i < free_idx);) {
+    for (size_t i = 0; (rv > 0) && (i < free_idx); i++) {
       if (tasks[i].is_used) {
+        con_task_t *task = &(tasks[i]);
+        pollfd_t   *clfd = &(clfds[i]);
 
-        con_task_t *task      = &(tasks[i]);
-        pollfd_t   *clfd      = &(clfds[i]);
-        bool       close_con  = false;
-
-        if (handle_task(clfd, task, &close_con)) {
+        if (handle_task(&i, clfd, task, &free_idx, &nfds)) {
           rv--;
-
-          if (unlikely(close_con)) {
-            size_t copy_siz = (free_idx - 1) - i;
-
-            if (copy_siz > 0) {
-              memmove(clfd, &(clfd[1]), copy_siz * sizeof(pollfd_t));
-              memmove(task, &(task[1]), copy_siz * sizeof(con_task_t));
-            }
-
-            nfds--;
-            free_idx--;
-            memset(&(tasks[free_idx]), 0, sizeof(con_task_t));
-            continue;
-          }
         }
       }
-      i++;
     }
   }
 
@@ -344,16 +290,12 @@ clean_up:
   if (tasks != NULL) {
     for (size_t i = 0; i < free_idx; i++) {
       if (tasks[i].is_used) {
-        void *claddr = (void *)&(tasks[i].cli_addr);
-
-        printf("Closing connection from %s:%d...\n", HP_CC(claddr));
-
         if (tasks[i].fhandle != NULL) {
           fclose(tasks[i].fhandle);
         }
-
+        free(tasks[i].pkt);
+        free(tasks[i].fbuf);
         close(tasks[i].cli_fd);
-        free(tasks[i].heap);
       }
     }
   }
@@ -383,221 +325,215 @@ accept_cli(
   nfds_t         *nfds
 )
 {
-  if (likely((net_pfd->revents & pfbits) == 0)) {
-    return false;
-  }
+  short revents = net_pfd->revents;
 
-  bool                drop_con; /* Be true if we don't accept conn. */
-  int                 cli_fd;   /* Client file descriptor.          */
-  struct sockaddr_in  drop_tmp; /* Unaccepted connection address.   */
-  struct sockaddr_in  *cli_addr  = NULL;
-  con_task_t          *task      = NULL;
-  pollfd_t            *pfd       = NULL;
-  size_t              idx        = *free_idx;
-  socklen_t           rlen       = sizeof(struct sockaddr_in);
+  if (unlikely((revents & POLLIN) != 0)) {
 
-  drop_con = (idx >= MAX_CONNECTIONS);
+    bool                drop_con; /* Be true if we don't accept conn. */
+    int                 cli_fd;   /* Client file descriptor.          */
+    struct sockaddr_in  drop_tmp; /* Unaccepted connection address.   */
+    struct sockaddr_in  *cli_addr  = NULL;
+    con_task_t          *task      = NULL;
+    pollfd_t            *pfd       = NULL;
+    socklen_t           rlen       = sizeof(struct sockaddr_in);
 
-  if (unlikely(drop_con)) {
-    /*
-     * If the connection entry is full, we accept the new connection 
-     * then close it immediately.
-     */
-    cli_addr = &drop_tmp;
-  } else {
-    pfd      = &(clfds[idx]);
-    task     = &(tasks[idx]);
-    cli_addr = &(task->cli_addr);
-  }
+    drop_con = (*free_idx >= MAX_CONNECTIONS);
 
-  cli_fd = accept(net_pfd->fd, (struct sockaddr *)cli_addr, &rlen);
-
-  if (unlikely(cli_fd < 0)) {
-    if (errno != EWOULDBLOCK) {
-      printf("Error: accept(): \"%s\"\n", strerror(errno));
+    if (unlikely(drop_con)) {
+      /*
+       * If the connection entry is full, we accept the new connection 
+       * then close it immediately.
+       */
+      cli_addr = &drop_tmp;
+    } else {
+      pfd      = &(clfds[*free_idx]);
+      task     = &(tasks[*free_idx]);
+      cli_addr = &(task->cli_addr);
     }
-    goto ret;
+
+    cli_fd = accept(net_pfd->fd, (struct sockaddr *)cli_addr, &rlen);
+
+    if (unlikely(cli_fd < 0)) {
+
+      if (errno == EWOULDBLOCK) {
+        /* fd is not ready yet. */
+        goto ret_fal;
+      }
+      printf("Error: accept(): \"%s\"\n", strerror(errno));
+
+    } else
+    if (unlikely(drop_con)) {
+
+      /* Task array is full. */
+      printf("Error: cannot accept more connection!\n");
+      goto drop_con;
+
+    } else {
+
+      printf("Accepting connection from %s:%d...\n", HP_CC(cli_addr));
+      if (init_task(cli_fd, task)) {
+        pfd->fd      = cli_fd;
+        pfd->events  = POLLIN;
+        pfd->revents = 0;
+        *nfds        = *nfds + 1;
+        *free_idx    = *free_idx + 1;
+      } else {
+        printf("Error: cannot create task!\n");
+        goto drop_con;
+      }
+    }
+
+
+  ret_true:
+    return true;
+
+  drop_con:
+    printf("Dropping connection from %s:%d...\n", HP_CC(cli_addr));
+    close(cli_fd);
+    goto ret_true;
+
+  } else
+  if (unlikely((revents & (POLLHUP | POLLERR | POLLNVAL)) != 0)) {
+    stop = true;
   }
 
-
-  if (unlikely(drop_con)) {
-    printf("Error: cannot accept more connection!\n");
-    goto drop_con;
-  }
-
-
-  printf("Accepting connection from %s:%d...\n", HP_CC(cli_addr));
-
-  if (init_task(cli_fd, task)) {
-    pfd->fd      = cli_fd;
-    pfd->events  = POLLIN;
-    pfd->revents = 0;
-    *free_idx    = idx + 1;
-    *nfds        = *nfds + 1;
-  } else {
-    printf("Error: cannot create task!\n");
-    goto drop_con;
-  }
-
-
-ret:
-  return true;
-
-drop_con:
-  printf("Dropping connection from %s:%d...\n", HP_CC(cli_addr));
-  close(cli_fd);
-  goto ret;
+ret_fal:
+  return false;
 }
 
 
 /**
- * @param int        cli_fd
- * @param con_task_t *task
+ * @param size_t      *_i,
+ * @param pollfd_t    *clfd,
+ * @param con_task_t  *task,
+ * @param size_t      *free_idx,
+ * @param nfds_t      *nfds
  * @return bool
  */
 inline static bool
-init_task(int cli_fd, con_task_t *task)
+handle_task(
+  size_t      *_i,
+  pollfd_t    *clfd,
+  con_task_t  *task,
+  size_t      *free_idx,
+  nfds_t      *nfds
+)
 {
-  void   *heap;
-  packet *pkt;
-  char   *fbuf;
-  const size_t pkt_siz  = sizeof(packet) + BUFFER_SIZE;
-  const size_t fbuf_siz = FILE_BUFFER_SIZ;
+  bool   ret = true;
+  size_t i   = *_i;
 
-  heap = malloc(pkt_siz + fbuf_siz);
-  if (heap == NULL) {
-    printf("Error: cannot allocate memory for a new task\n");
-    return false;
-  }
+  if ((clfd->revents & (POLLIN | POLLHUP | POLLERR | POLLNVAL)) != 0) {
+    char        *buf;
+    ssize_t     recv_l;
+    packet      *pkt;
 
-  pkt           = (packet *)heap;
-  fbuf          = &(((char *)heap)[pkt_siz]);
+    clfd->revents = 0;
+    pkt           = task->pkt;
+    buf           = &(((char *)pkt)[task->cpos]);
+    recv_l        = recv(clfd->fd, buf, BUFFER_SIZE, 0);
 
-  task->is_used = true;
-  task->cli_fd  = cli_fd;
-  task->cpos    = 0;
-  task->clen    = 0;
-  task->fbuf    = fbuf;
-  task->fhandle = NULL;
-  task->pkt     = pkt;
-  task->heap    = heap;
-  return true;
-}
+    if (unlikely(recv_l < 0)) {
 
+      if (errno == EWOULDBLOCK) {
+        /* fd is not ready yet. */
+        ret = false;
+        goto ret;
+      }
 
-/**
- * @param pollfd_t    *clfd
- * @param con_task_t  *task
- * @param bool        *close_con
- * @return bool
- */
-inline static bool
-handle_task(pollfd_t *clfd, con_task_t *task, bool *close_con)
-{
-  if ((clfd->revents & pfbits) == 0) {
-    return false;
-  }
+      /* An error occured. */
+      printf("Error: recv(): \"%s\" (%s:%d)\n",
+             strerror(errno),
+             HP_CC(&(task->cli_addr)));
 
-  char        *buf;
-  packet      *pkt;
-  ssize_t     recv_l;
-  void        *claddr = (void *)&(task->cli_addr);
-
-  clfd->revents = 0;
-  pkt           = task->pkt;
-  buf           = &(((char *)pkt)[task->cpos]);
-  recv_l        = recv(clfd->fd, buf, BUFFER_SIZE, 0);
-
-  if (unlikely(recv_l < 0)) {
-
-    if (errno != EWOULDBLOCK) {
-      char *errstr = strerror(errno);
-      printf("Error: recv() [%s:%d]: \"%s\"\n", HP_CC(claddr), errstr);
       goto close_cli;
     }
 
-    goto ret;
-  }
+
+    if (unlikely(recv_l == 0)) {
+      /* Client has been disconnected. */
+      goto close_cli;
+    }
 
 
-  if (unlikely(recv_l == 0)) {
-    /* Client has been disconnected. */
-    goto close_cli;
-  }
+    {
+      size_t recv_siz     = (size_t)recv_l;
+      size_t min_size     = OFFSETOFF(packet, content);
+      size_t total_siz    = task->clen + recv_siz;
+      task->clen          = total_siz;
 
+      if (likely(total_siz >= min_size)) {
+        /*
+         * If total_siz is greater than or equals to min_size, meaning
+         * that we have received the file information, such as
+         * filename_len, filename, file_size and maybe partial bytes
+         * of then content. Therefore we are receiving the content of
+         * the file.
+         */
+        FILE   *fhandle;
+        size_t fwrite_siz;
+        size_t content_siz;
 
+        if (unlikely(task->fhandle == NULL)) {
 
-  {
-    size_t recv_siz     = (size_t)recv_l;
-    size_t min_size     = OFFSETOFF(packet, content);
-    size_t total_siz    = task->clen + recv_siz;
-    task->clen          = total_siz;
+          if (!open_fhandle(task)) {
+            goto close_cli;
+          }
 
-    if (likely(total_siz >= min_size)) {
-      /*
-       * If total_siz is greater than or equals to min_size, meaning
-       * that we have received the file information, such as
-       * filename_len, filename, file_size and maybe partial bytes
-       * of then content. Therefore we are receiving the content of
-       * the file.
-       */
-      FILE   *fhandle;
-      size_t fwrite_siz;
-      size_t content_siz;
+          printf("Receiving file from %s:%d...\n",
+                 HP_CC(&(task->cli_addr)));
 
-      if (unlikely(task->fhandle == NULL)) {
+          task->cpos     = min_size;
+          pkt->file_size = be64toh(pkt->file_size);
+          fhandle        = task->fhandle;
+          fwrite_siz     = total_siz - min_size;
+        } else {
+          fhandle        = task->fhandle;
+          fwrite_siz     = recv_siz;
+        }
 
-        if (!open_fhandle(task)) {
+        content_siz = total_siz - min_size;
+
+        if (likely(fwrite_siz > 0)) {
+          /* Write the file. */
+          fwrite(pkt->content, fwrite_siz, sizeof(char), fhandle);
+        }
+
+        if (unlikely(pkt->file_size <= content_siz)) {
+          printf("File received completely!\n");
           goto close_cli;
         }
 
-        printf("Receiving file from %s:%d...\n", HP_CC(claddr));
-
-        task->cpos     = min_size;
-        pkt->file_size = be64toh(pkt->file_size);
-        fhandle        = task->fhandle;
-        fwrite_siz     = total_siz - min_size;
       } else {
-        fhandle        = task->fhandle;
-        fwrite_siz     = recv_siz;
+        /* We haven't received the file info in details. */
+        task->cpos = total_siz;
       }
-
-      content_siz = total_siz - min_size;
-
-      if (likely(fwrite_siz > 0)) {
-        /* Write the file. */
-        fwrite(pkt->content, fwrite_siz, sizeof(char), fhandle);
-      }
-
-      printf("file_size: %ld\n", pkt->file_size);
-      printf("content_siz: %ld\n", content_siz);
-
-      if (unlikely(pkt->file_size <= content_siz)) {
-        printf("File received completely!\n");
-        goto close_cli;
-      }
-
-    } else {
-      /* We haven't received the file info in details. */
-      task->cpos = total_siz;
     }
+  } else {
+    ret = false;
+  }
+
+  goto ret;
+
+close_cli:
+  {
+    printf("Closing connection from %s:%d\n", HP_CC(&(task->cli_addr)));
+
+    if (task->fhandle != NULL) {
+      /* We must not free the task->fbuf before this point. */
+      fclose(task->fhandle);
+      task->fhandle = NULL;
+    }
+
+    free(task->pkt);
+    free(task->fbuf);
+    close(task->cli_fd);
+
+    memset(clfd, 0, sizeof(pollfd_t));
+    memset(task, 0, sizeof(con_task_t));
   }
 
 ret:
-  return true;
-
-close_cli:
-  printf("Closing connection from %s:%d...\n", HP_CC(claddr));
-
-  if (task->fhandle != NULL) {
-    /* We must not free the task->heap before this fclose. */
-    fclose(task->fhandle);
-  }
-
-  close(task->cli_fd);
-  free(task->heap);
-  *close_con = true;
-  goto ret;
+  return ret;
 }
 
 
@@ -631,6 +567,7 @@ open_fhandle(con_task_t *task)
       return false;
     }
 
+    task->file_fd = fd;
     fhandle       = fdopen(fd, "wb");
     if (unlikely(fhandle == NULL)) {
       printf("Error: cannot load file descriptor to fdopen (%d)\n", fd);
@@ -657,6 +594,46 @@ open_fhandle(con_task_t *task)
 
 
 /**
+ * @param int        cli_fd
+ * @param con_task_t *task
+ * @return bool
+ */
+inline static bool
+init_task(int cli_fd, con_task_t *task)
+{
+  packet *pkt  = NULL;
+  char   *fbuf = NULL;
+
+  pkt = (packet *)malloc(sizeof(packet) + BUFFER_SIZE);
+  if (unlikely(pkt == NULL)) {
+    printf("Error: cannot allocate memory for packet\n");
+    goto err;
+  }
+
+  fbuf = (char *)malloc(FILE_BUFFER_SIZ);
+  if (unlikely(fbuf == NULL)) {
+    printf("Error: cannot allocate memory for fbuf\n");
+    goto err;
+  }
+
+  task->is_used = true;
+  task->cli_fd  = cli_fd;
+  task->cpos    = 0;
+  task->clen    = 0;
+  task->file_fd = -1;
+  task->fbuf    = fbuf;
+  task->fhandle = NULL;
+  task->pkt     = pkt;
+  return true;
+
+err:
+  free(pkt);
+  free(fbuf);
+  return false;
+}
+
+
+/**
  * @param int sig
  * @return void
  */
@@ -665,5 +642,4 @@ interrupt_handler(int sig)
 {
   (void)sig;
   stop = true;
-  putchar('\n');
 }
