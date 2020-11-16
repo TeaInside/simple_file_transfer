@@ -133,7 +133,7 @@ file_server(char *bind_addr, uint16_t bind_port)
   int                retval;
   int                net_fd;
   struct sockaddr_in srv_addr;
-  const size_t       srv_addr_siz = sizeof(struct sockaddr_in);
+  const socklen_t    srv_addr_siz = sizeof(struct sockaddr_in);
 
   net_fd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0);
   if (net_fd < 0) {
