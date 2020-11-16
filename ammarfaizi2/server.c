@@ -217,7 +217,7 @@ setup_socket(int net_fd)
 
   SET_X(net_fd, SOL_SOCKET, SO_REUSEADDR, &val, sizeof(int));
 
-
+  #undef SET_X
   return 0;
 }
 
@@ -296,7 +296,7 @@ event_loop(int net_fd)
 
     if (unlikely(rv == 0)) {
       if (unlikely(stop)) {
-        break;
+        goto clean_up;
       }
       /* Poll reached its timeout. */
       continue;
@@ -606,14 +606,21 @@ close_cli:
 inline static bool
 open_fhandle(con_task_t *task)
 {
-  FILE   *fhandle = NULL;
-  packet *pkt     = task->pkt;
-  char   bfn[sizeof("uploaded_files/") + 255 + 1];
+  #define bbfn_siz (sizeof("uploaded_files/"))
+  #define bfn_siz  (sizeof("uploaded_files/") + 255)
+
+  FILE          *fhandle     = NULL;
+  packet        *pkt         = task->pkt;
+  uint8_t       fname_len    = pkt->filename_len;
+  char          bfn[bfn_siz] = "uploaded_files/";
 
   /* For safety. */
-  pkt->filename[pkt->filename_len % 255] = '\0';
+  pkt->filename[(fname_len == 0xff) ? 254 : fname_len] = '\0';
 
-  sprintf(bfn, "uploaded_files/%s", pkt->filename);
+  memcpy(&(bfn[bbfn_siz - 1]), pkt->filename, fname_len);
+
+  #undef bbfn_siz
+  #undef bfn_siz
 
 #if defined(__linux__)
   {
