@@ -47,7 +47,7 @@
 #  error Compiler is not supported!
 #endif
 
-
+#define pfbits (POLLIN | POLLHUP | POLLERR | POLLNVAL)
 
 #define HP_CC(CLI_PTR)                                    \
   inet_ntoa(((struct sockaddr_in *)(CLI_PTR))->sin_addr), \
@@ -69,13 +69,13 @@ typedef struct _con_task
 
 typedef struct pollfd pollfd_t;
 
-static int
+inline static int
 file_server(char *bind_addr, uint16_t bind_port);
 
-static int
+inline static int
 event_loop(int net_fd);
 
-static void
+inline static void
 interrupt_handler(int sig);
 
 inline static bool
@@ -98,8 +98,6 @@ open_fhandle(con_task_t *task);
 
 inline static int
 setup_socket(int net_fd);
-
-static const short pfbits = (POLLIN | POLLHUP | POLLERR | POLLNVAL);
 
 bool stop = false;
 
@@ -127,7 +125,7 @@ main(int argc, char *argv[])
  * @param uint16_t  bind_port
  * @return int
  */
-static int
+inline static int
 file_server(char *bind_addr, uint16_t bind_port)
 {
   int                retval;
@@ -170,7 +168,7 @@ file_server(char *bind_addr, uint16_t bind_port)
   if (retval < 0) {
     printf("Error listen socket: %s\n", strerror(errno));
     retval = 1;
-    goto close_net_fd; 
+    goto close_net_fd;
   }
 
 
@@ -226,7 +224,7 @@ setup_socket(int net_fd)
  * @param int net_fd
  * @return int
  */
-static int
+inline static int
 event_loop(int net_fd)
 {
   int             ret       = 1;    /* The exit code.                 */
@@ -459,9 +457,9 @@ drop_con:
 inline static bool
 init_task(int cli_fd, con_task_t *task)
 {
-  void   *heap;
-  packet *pkt;
-  char   *fbuf;
+  void         *heap;
+  packet       *pkt;
+  char         *fbuf;
   const size_t pkt_siz  = sizeof(packet) + BUFFER_SIZE;
   const size_t fbuf_siz = FILE_BUFFER_SIZ;
 
@@ -665,7 +663,7 @@ open_fhandle(con_task_t *task)
  * @param int sig
  * @return void
  */
-static void
+inline static void
 interrupt_handler(int sig)
 {
   (void)sig;
