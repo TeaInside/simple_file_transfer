@@ -554,13 +554,12 @@ handle_task(pollfd_t *clfd, con_task_t *task, bool *close_con)
 
         task->cpos     = min_size;
         pkt->file_size = be64toh(pkt->file_size);
-        fhandle        = task->fhandle;
         fwrite_siz     = total_siz - min_size;
       } else {
-        fhandle        = task->fhandle;
         fwrite_siz     = recv_siz;
       }
 
+      fhandle     = task->fhandle;
       content_siz = total_siz - min_size;
 
       if (likely(fwrite_siz > 0)) {
