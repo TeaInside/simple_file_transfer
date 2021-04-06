@@ -1,4 +1,8 @@
+CC=tcc
 
 all:
-	gcc client.c -o client
-	gcc server.c -o server
+	$(CC) client.c -o client
+	$(CC) server.c -o server
+
+clean:
+	rm -rf client server
