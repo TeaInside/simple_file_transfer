@@ -42,7 +42,7 @@ main(int argc, char *argv[])
 		return EXIT_FAILURE;
 	}
 
-	return inet_handler(argv[1], atoi(argv[2]), argv[3]);
+	return inet_handler(argv[1], (uint16_t)atoi(argv[2]), argv[3]);
 }
 
 /* function for handling internet connection
@@ -97,8 +97,8 @@ inet_handler(const char* address,
 	}
 
 	strncpy(packet_data->filename, basename, sizeof(packet_data->filename));
-	packet_data->filename_len = strlen(basename);
-	packet_data->file_size = s_file.st_size;
+	packet_data->filename_len = (uint8_t)strlen(basename);
+	packet_data->file_size = (uint64_t)s_file.st_size;
 
 	/* print file properties */
 	puts("\nFile info: ");
@@ -118,7 +118,7 @@ inet_handler(const char* address,
 	/* TCP configuration */
 	server.sin_addr.s_addr = inet_addr(address);
 	server.sin_family = AF_INET;
-	server.sin_port = htons(port);
+	server.sin_port = (uint16_t)htons(port);
 
 	/* let's connect to server, yay! */
 	if (connect(client_fd, (struct sockaddr*)&server,
@@ -169,8 +169,8 @@ inet_handler(const char* address,
 		}
 
 		/* send bytes data to server */
-		send_bytes = send(client_fd, packet_data->content, read_bytes, 0);
-		if (sent_bytes < 0) {
+		send_bytes = send(client_fd, packet_data->content, (size_t)read_bytes, 0);
+		if (send_bytes < 0) {
 			perror("Send file");
 			is_error = TRUE;
 			break;

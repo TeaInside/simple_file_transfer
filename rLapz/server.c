@@ -40,7 +40,7 @@ main(int argc, char *argv[])
 		return EXIT_FAILURE;
 	}
 
-	return inet_handler(argv[1], atoi(argv[2]));
+	return inet_handler(argv[1], (uint16_t)atoi(argv[2]));
 }
 
 
@@ -195,7 +195,7 @@ file_handler(int *client_fd)
 		}
 
 		/* write to desired file/path */
-		write_bytes = write(file_desc, packet_data->content, recv_bytes);
+		write_bytes = write(file_desc, packet_data->content, (size_t)recv_bytes);
 		if (write_bytes < 0) {
 			perror("Write file");
 			is_error = TRUE;
