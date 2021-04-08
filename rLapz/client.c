@@ -35,7 +35,7 @@ static char * get_basename(const char *path);
 
 
 int
-main(int argc, char *argv[], char *envp[])
+main(int argc, char *argv[])
 {
 	if (argc < 4) {
 		printf("Usage:\n\t%s [address] [port] [file_target]\n", argv[0]);
@@ -53,18 +53,29 @@ static int
 inet_handler(const char* address,
 		uint16_t port, const char* filename)
 {
-	struct stat s_file			= {0};
-	struct sockaddr_in server	= {0};
-	short int is_error			= FALSE;
-	int client_fd				= 0;
-	int file_fd					= 0;
-	ssize_t read_bytes			= 0;
-	ssize_t send_bytes			= 0;
-	size_t sent_bytes			= 0;
+	struct stat s_file	= {0};
+	struct sockaddr_in server = {0};
+
+	short int is_error	= FALSE;
+	int client_fd		= 0;
+	int file_fd		= 0;
+	ssize_t read_bytes	= 0;
+	ssize_t send_bytes	= 0;
+	size_t sent_bytes	= 0;
 	/* why heap? because I need flexible memory size, though. */
-	char *data_arena			= calloc(sizeof(packet), sizeof(packet));
-	packet *packet_data			= (packet*)data_arena;
-	char *basename				= NULL;
+	char *data_arena	= NULL;
+	char *data_arena_tmp	= NULL;
+	packet *packet_data	= NULL;
+	char *basename		= NULL;
+	
+
+	data_arena = calloc(sizeof(packet), sizeof(packet));
+	if (data_arena == NULL) {
+		perror("Allocation data_arena");
+		is_error = TRUE;
+		return EXIT_FAILURE;
+	}
+	packet_data = (packet*)data_arena;
 
 	/* file checking */
 	if (stat(filename, &s_file) < 0) {
@@ -93,7 +104,7 @@ inet_handler(const char* address,
 	puts("\nFile info: ");
 	printf(" -> File name\t\t: %s\n", packet_data->filename);
 	printf(" -> File name length:\t: %d\n", packet_data->filename_len);
-	printf(" -> File size\t\t: %zu byte\n", packet_data->file_size);
+	printf(" -> File size\t\t: %zu bytes\n", packet_data->file_size);
 	printf(" -> Send to\t\t: %s:%d\n", address, port);
 
 	/* Create socket */
@@ -111,22 +122,30 @@ inet_handler(const char* address,
 
 	/* let's connect to server, yay! */
 	if (connect(client_fd, (struct sockaddr*)&server,
-				sizeof(server)) < 0) {
+			sizeof(server)) < 0) {
 		perror("Connect to server");
 		is_error = TRUE;
 		goto cleanup;
 	}
 
 	/* send file properties */
-	send_bytes = send(client_fd, packet_data, sizeof(packet), 0);
+	send_bytes = send(client_fd, packet_data, BUFFER_SIZE, 0);
 	if (send_bytes < 0) {
 		perror("Send data");
 		is_error = TRUE;
 		goto cleanup;
 	}
+	send_bytes = 0; /* reset */
 
-	/* Reallocation memory size*/
-	data_arena = realloc(data_arena, sizeof(packet) + packet_data->file_size);
+	/* reallocation memory size */
+	data_arena_tmp = realloc(data_arena, sizeof(packet) + packet_data->file_size);
+	if (data_arena_tmp == NULL) {
+		perror("Allocation data_arena_tmp");
+		is_error = TRUE;
+		goto cleanup;
+	}
+
+	data_arena = data_arena_tmp;
 	packet_data = (packet*)data_arena;
 
 	puts("\nSending file...");
@@ -141,24 +160,28 @@ inet_handler(const char* address,
 
 	/* send file to server */
 	while (sent_bytes < (packet_data->file_size)) {
+		/* read bytes from file */
 		read_bytes = read(file_fd, packet_data->content, READ_FILE_BUF);
 		if (read_bytes < 0) {
 			perror("Read file");
 			is_error = TRUE;
 			break;
 		}
+
+		/* send bytes data to server */
 		send_bytes = send(client_fd, packet_data->content, read_bytes, 0);
 		if (sent_bytes < 0) {
 			perror("Send file");
 			is_error = TRUE;
 			break;
 		}
-		sent_bytes += read_bytes;
+		sent_bytes += (size_t)read_bytes;
+
 		/*
 		printf("Sent bytes: %lu\n", sent_bytes);
+		usleep(800);
 		*/
 	}
-	puts("\nDone, uWu :3\n");
 
 cleanup:
 	free(basename);
@@ -167,8 +190,11 @@ cleanup:
 		close(client_fd);
 	if (file_fd > 0)
 		close(file_fd);
-	if (is_error == TRUE)
+	if (is_error == TRUE) {
+		puts("\nFailed :( \n");
 		return EXIT_FAILURE;
+	}
+	puts("\nDone, uWu :3\n");
 
 	return EXIT_SUCCESS;
 }

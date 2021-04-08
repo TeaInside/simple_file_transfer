@@ -25,7 +25,7 @@
 #define FALSE	1
 
 /* function declarations */
-static void file_handler(int *client_fd, int *server_fd);
+static void file_handler(int *client_fd);
 static int inet_handler(const char *addr, uint16_t port);
 
 /* global variable declarations */
@@ -33,7 +33,7 @@ static int inet_handler(const char *addr, uint16_t port);
 
 
 int
-main(int argc, char *argv[], char *envp[])
+main(int argc, char *argv[])
 {
 	if (argc < 3 || argc > 3) {
 		printf("Usage:\n\t%s [address] [port]\n", argv[0]);
@@ -48,10 +48,10 @@ main(int argc, char *argv[], char *envp[])
 static int
 inet_handler(const char *addr, uint16_t port)
 {
-	short int is_error			= FALSE;
-	int socket_option			= 1;
-	int server_fd				= 0;
-	int client_fd				= 0;
+	short int is_error		= FALSE;
+	int socket_option		= 1;
+	int server_fd			= 0;
+	int client_fd			= 0;
 	struct sockaddr_in server	= {0};
 	struct sockaddr_in client	= {0};
 	socklen_t client_len		= 0;
@@ -67,7 +67,7 @@ inet_handler(const char *addr, uint16_t port)
 	/* Socket option
 	 * Reuse IP address */
 	if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR,
-					&socket_option, sizeof(socket_option)) < 0) {
+			&socket_option, sizeof(socket_option)) < 0) {
 		perror("Reuse address");
 		is_error = TRUE;
 		goto cleanup;
@@ -103,13 +103,15 @@ inet_handler(const char *addr, uint16_t port)
 			continue;
 		} else {
 			puts("Connection accepted");
-			file_handler(&client_fd, &server_fd);
+			file_handler(&client_fd);
 		}
 	}
 
 cleanup:
-	close(server_fd);
-	close(client_fd);
+	if (server_fd > 0)
+		close(server_fd);
+	if (client_fd > 0)
+		close(client_fd);
 	if (is_error == TRUE)
 		return EXIT_FAILURE;
 
@@ -117,29 +119,43 @@ cleanup:
 }
 
 static void
-file_handler(int *client_fd, int *server_fd)
+file_handler(int *client_fd)
 {
-	ssize_t recv_bytes		= 0;
-	ssize_t recv_ok_bytes	= 0;
-	ssize_t write_bytes		= 0;
-	size_t total_bytes		= 0;
+	ssize_t recv_bytes	= 0;
+	ssize_t write_bytes	= 0;
+	size_t total_bytes	= 0;
 
-	short int is_error		= 0;
-	int file_desc			= 0;
+	short int is_error	= FALSE;
+	int file_desc		= 0;
 	char target_file[255]	= {0};
 	/* why heap? because I need flexible memory size, though. */
-	char *data_arena		= calloc(sizeof(packet), sizeof(packet));
-	packet *packet_data		= (packet*)data_arena;
+	char *data_arena	= NULL;
+	char *data_arena_tmp	= NULL;
+	packet *packet_data	= NULL;
+
+
+	data_arena = calloc(sizeof(packet), sizeof(packet));
+	if (data_arena == NULL) {
+		perror("Allocation data_arena");
+		is_error = TRUE;
+		return;
+	}
+	packet_data = (packet*)data_arena;
 	
+	printf("%lu\n", sizeof(packet));
 	/* get file properties */
-	while (recv_ok_bytes < sizeof(packet)) {
-		recv_bytes = recv(*client_fd, (char*)packet_data+recv_ok_bytes, BUFFER_SIZE, 0);
+	while (total_bytes < BUFFER_SIZE) {
+		recv_bytes = recv(*client_fd,
+				(char*)packet_data+total_bytes, BUFFER_SIZE, 0);
 		if (recv_bytes < 0) {
 			perror("Recv");
+			is_error = TRUE;
 			goto cleanup;
 		}
-		recv_ok_bytes += recv_bytes;
+		printf("bytes: %zu\n", recv_bytes);
+		total_bytes += (size_t)recv_bytes;
 	}
+	total_bytes = 0; /* reset */
 
 	/* fill packet_data->filename with file properies that received from client */
 	snprintf(target_file, sizeof(packet_data->filename),
@@ -149,18 +165,23 @@ file_handler(int *client_fd, int *server_fd)
 	puts("\nFile info: ");
 	printf(" -> File name\t\t: %s\n", packet_data->filename);
 	printf(" -> File name length\t: %d\n", packet_data->filename_len);
-	printf(" -> File size\t\t: %zu byte\n", packet_data->file_size);
+	printf(" -> File size\t\t: %zu bytes\n", packet_data->file_size);
 	printf(" -> Stored at\t\t: %s\n", target_file);
 
 	/* reallocation memory size */
-	/* I know this kinda not safe */
-	data_arena = realloc(data_arena, sizeof(packet) + packet_data->file_size);
-	memset(data_arena, 0, sizeof(data_arena));
+	data_arena_tmp = realloc(data_arena, sizeof(packet) + packet_data->file_size);
+	if (data_arena_tmp == NULL) {
+		perror("Allocation data_arena_tmp");
+		is_error = TRUE;
+		goto cleanup;
+	}
+
+	data_arena = data_arena_tmp;
 	packet_data = (packet*)data_arena;
 
-	/* Create and open file (overwritten) */
+	/* Create and open file (overwrite) */
 	file_desc = open(target_file, O_WRONLY|O_CREAT|O_TRUNC,
-					S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH);
+			S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH);
 	if (file_desc < 0)
 		perror("Create/open file");
 
@@ -169,7 +190,7 @@ file_handler(int *client_fd, int *server_fd)
 		recv_bytes = recv(*client_fd, packet_data->content, BUFFER_SIZE, 0);
 		if (recv_bytes < 0) {
 			perror("Receive file");
-			is_error = 1;
+			is_error = TRUE;
 			break;
 		}
 
@@ -177,22 +198,22 @@ file_handler(int *client_fd, int *server_fd)
 		write_bytes = write(file_desc, packet_data->content, recv_bytes);
 		if (write_bytes < 0) {
 			perror("Write file");
-			is_error = 1;
+			is_error = TRUE;
 			break;
 		}
-		total_bytes += recv_bytes;
+		total_bytes += (size_t)recv_bytes;
 
 		/*
-		printf("Recv bytes: %lu\n", total_bytes);
+		printf("Recv bytes total: %lu\n", total_bytes);
+		usleep(800);
 		*/
 	}
 
-	if (is_error > 1)
+cleanup:
+	if (is_error == TRUE)
 		puts("\nFailed :( \n");
 	else
 		puts("\nDone, uWu :3\n");
-
-cleanup:
 	free(data_arena);
 }
 
