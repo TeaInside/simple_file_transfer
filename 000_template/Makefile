@@ -1,14 +1,12 @@
 # SPDX-License-Identifier: GPL-2.0
 
-
-
 #
 # Want to change the compiler?
 #   `make CC=clang`
+#
 CC := cc
 LD := $(CC)
-CFLAGS := -O2 -Wall -Wextra -fpie -fPIE -std=c11 -fno-omit-frame-pointer \
-	-pedantic-errors -ggdb3
+CFLAGS := -O2 -Wall -Wextra -fpie -fPIE -std=c11 -pedantic-errors -ggdb3 -fno-omit-frame-pointer
 LDFLAGS := -O2 -fpie -fPIE
 OBJ := ftransfer.o server.o client.o
 
