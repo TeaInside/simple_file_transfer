@@ -1,9 +1,10 @@
+# SPDX-License-Identifier: GPL-2.0
+
+
 
 #
 # Want to change the compiler?
 #   `make CC=clang`
-#
-
 CC := cc
 LD := $(CC)
 CFLAGS := -O2 -Wall -Wextra -fpie -fPIE -std=c11 -fno-omit-frame-pointer \
