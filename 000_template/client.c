@@ -1,7 +1,16 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * Simple file transfer client
+ *
+ * Copyright (C) 2021  Your Name <your_email@domain.com>
+ */
 
-#include "data_structure.h"
+#include "ftransfer.h"
 
-int main(int argc, char *argv[], char *envp[])
+
+int run_client(int argc, char *argv[])
 {
-  return 0;
+	(void)argc;
+	(void)argv;
+	return 0;
 }
