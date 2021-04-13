@@ -10,6 +10,7 @@
 
 #include <stdint.h>
 
+void print_help(void);
 int run_server(int argc, char *argv[]);
 int run_client(int argc, char *argv[]);
 

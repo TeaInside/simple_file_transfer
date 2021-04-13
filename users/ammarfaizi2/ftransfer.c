@@ -2,7 +2,7 @@
 /*
  * Simple file transfer (entry file)
  *
- * Copyright (C) 2021  Your Name <your_email@domain.com>
+ * Copyright (C) 2021  Ammar Faizi <ammarfaizi2@gmail.com>
  */
 
 #include <errno.h>
@@ -11,8 +11,9 @@
 
 #include "ftransfer.h"
 
+static const char *app = NULL;
 
-static void print_help(const char *app)
+void print_help(void)
 {
 	printf("Usage: \n");
 	printf("  %s server [bind_addr] [bind_port]\n", app);
@@ -22,8 +23,10 @@ static void print_help(const char *app)
 
 int main(int argc, char *argv[])
 {
+	app = argv[0];
+
 	if (argc < 2) {
-		print_help(argv[0]);
+		print_help();
 		return 0;
 	}
 
@@ -34,6 +37,6 @@ int main(int argc, char *argv[])
 		return run_client(argc, argv + 2);
 
 	printf("Error: Invalid argument \"%s\"\n\n", argv[1]);
-	print_help(argv[0]);
+	print_help();
 	return EINVAL;
 }

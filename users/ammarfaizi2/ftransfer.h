@@ -2,7 +2,7 @@
 /*
  * Simple file transfer header
  *
- * Copyright (C) 2021  Your Name <your_email@domain.com>
+ * Copyright (C) 2021  Ammar Faizi <ammarfaizi2@gmail.com>
  */
 
 #ifndef FTRANSFER_H
@@ -10,6 +10,7 @@
 
 #include <stdint.h>
 
+void print_help(void);
 int run_server(int argc, char *argv[]);
 int run_client(int argc, char *argv[]);
 
