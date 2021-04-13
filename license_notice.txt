@@ -1,0 +1,8 @@
+
+
+I changed the project LICENSE to GNU GPL v2.
+
+Separated license notice:
+Directory aviezab and rLapz are licensed under the MIT license. I don't have
+permission to change the license because they are not written by me.
+
