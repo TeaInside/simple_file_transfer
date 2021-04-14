@@ -65,7 +65,7 @@ union uni_pkt {
 ```
 
 File content should be placed at offset `raw_buf[sizeof(packet_t)]` at the beginning of buffer.
-In the next cycle of receiving file content, you may overwrite it from `&raw_buf[0]`.
+In the next cycle of receiving file content, you may overwrite it from `&raw_buf[0]` with file content.
 
 
 # License
