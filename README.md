@@ -46,6 +46,7 @@ make;
 
 
 # Technical Explanation
+## Protocol
 In this exercise, we have our own protocol. The data structure in this protocol is represented by this packed struct:
 ```c
 typedef struct __attribute__((packed)) packet_t {
@@ -72,6 +73,13 @@ In the next cycle of receiving file content, you may overwrite it from `&raw_buf
 - The client only `send()`, it doesn't need to call `recv()`.
 
 Keep it simple as this is a simple file transfer.
+
+## Where to save the file?
+Save the file to a relative directory named `uploaded_files` (it is provided in the template).
+
+## Security
+Simply make sure the server doesn't accept a file name that contains `..` (double dots).
+If the client sends a file name that contains this pattern, just close it, don't write anything to the disk.
 
 
 # License
