@@ -117,4 +117,4 @@ change the license without their permission.
 
 ### Files that are licensed under the MIT license
 - Any file in directory `users/aviezab`
-- Any file in directory `users/rLaps`
+- Any file in directory `users/rLapz`
