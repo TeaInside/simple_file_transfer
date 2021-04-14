@@ -90,8 +90,8 @@ Write any partial bytes the server has received.
 - Make sure you sync anything to the disk before the program exits.
 - Make sure you close all socket file descriptors before the program exits.
 - You need an interrupt handler to make sure resources are synced and closed properly.
-Catch `SIGINT`, `SIGTERM` and `SIGHUP` in your interrupt handler, and then release
-sync and release any resource before exit.
+Catch `SIGINT`, `SIGTERM` and `SIGHUP` in your interrupt handler, and then
+sync and close your resources before exit.
 - Ignore `SIGPIPE`.
 
 # License
