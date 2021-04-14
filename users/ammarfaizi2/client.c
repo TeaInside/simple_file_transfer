@@ -292,6 +292,22 @@ static int send_target_file(struct client_state *state)
 }
 
 
+static void destroy_state(struct client_state *state)
+{
+	int tcp_fd = state->tcp_fd;
+	FILE *handle = state->handle;
+
+	if (tcp_fd != -1) {
+		printf("Closing tcp_fd (%d)...\n", tcp_fd);
+		close(tcp_fd);
+	}
+
+	if (handle != NULL) {
+		fclose(handle);
+	}
+}
+
+
 static int internal_run_client(char *argv[])
 {
 	int ret;
@@ -325,6 +341,7 @@ static int internal_run_client(char *argv[])
 
 	ret = send_target_file(state);
 out:
+	destroy_state(state);
 	free(state);
 	return ret;
 }
