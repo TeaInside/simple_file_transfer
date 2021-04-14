@@ -1,34 +1,33 @@
 
-# Simple File Transfer
-
+# Short Intro
 Simple File Transfer is a socket programming exercise written in C language.
-Everyone can submit a pull request after completing the task. Your pull request
-will be reviewed by [@ammarfaizi2](https://github.com/ammarfaizi2), and
-then you will get suggestion and feedback from him.
+You can submit a pull request after completing the task. Your pull request
+will be reviewed by me ([@ammarfaizi2](https://github.com/ammarfaizi2)), and
+then you will get suggestion, feedback and maybe a request to change something
+before your PR be merged to the main branch.
 
-Supported platform is only Linux.
+Note: Target platform is only Linux.
 
 Pull request is welcomed through GitHub repository (https://github.com/TeaInside/simple_file_transfer).
 
+
 # Task
-You have to write TCP client and TCP server. The goal is simply to transfer a
+You have to write TCP client and server. The goal is simply to transfer a
 file from client to server.
 
 
+# Getting started
 ## Requirements
 - Git
 - GNU Make
 - C compiler (gcc or clang)
 - Linux environment
 
-
 ## Installation for Ubuntu
 ```sh
 sudo apt-get install gcc make git -y;
 ```
-
-
-## Getting started
+## Make your own program
 - Fork the GitHub repository.
 - Clone your fork repository.
 - Create your directory by copying the template to `users/<your_username>`.
