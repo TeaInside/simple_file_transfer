@@ -86,7 +86,7 @@ If the client sends a file name that contains this pattern, just close it, don't
 overwrite the existing file with it.
 - If the client closes the connection before it finished to transfer all content.
 Write any partial bytes the server has received.
-- Make sure you have no memory leak.
+- Make sure you have no memory leak. Use valgrind as memcheck should be helpful.
 - Make sure you sync anything to the disk before the program exits.
 - Make sure you close all socket file descriptors before the program exits.
 - You need an interrupt handler to make sure resources are synced and closed properly.
