@@ -9,8 +9,25 @@ Pull request is welcomed through GitHub repository (https://github.com/TeaInside
 
 
 # Task
-You have to write TCP client and TCP server. The goal is simply to transfer file from
-client to server.
+You have to write TCP client and TCP server. The goal is simply to transfer a
+file from client to server.
+
+
+## Requirements
+- Git
+- GNU Make
+- C compiler (gcc or clang)
+- Linux environment
+
+
+## Installation for Ubuntu
+```sh
+sudo apt-get install gcc make git -y;
+```
+
+
+# Technical Explanation
+We have our own protocol.
 
 ## Protocol
 ```c
