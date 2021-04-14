@@ -96,7 +96,8 @@ sync and close your resources before exit.
 
 
 ## Minimal Working Example
-You can see the minimal working example in `users/ammarfaizi2`. Or simply visit
+You can see the minimal working example in `users/ammarfaizi2`. Or simply visit:
+
 https://github.com/TeaInside/simple_file_transfer/tree/master/users/ammarfaizi2
 
 
