@@ -41,9 +41,12 @@ cd users/myusername;
 ```sh
 make;
 ```
+- Test your program, make sure it works perfectly.
+- Submit a pull request on GitHub repository (merge to the master branch).
+
 
 # Technical Explanation
-In this exercise, we have our own protocol. The data structure in this protocol is represented by a struct.
+In this exercise, we have our own protocol. The data structure in this protocol is represented by this packed struct:
 ```c
 typedef struct __attribute__((packed)) packet_t {
 	uint64_t	file_size;
