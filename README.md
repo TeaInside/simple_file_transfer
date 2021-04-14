@@ -26,6 +26,21 @@ sudo apt-get install gcc make git -y;
 ```
 
 
+## Get started
+- Fork the GitHub repository.
+- Clone the forked repository.
+- Copy the template to `users/<your username>`. For example:
+```
+cp -rf template users/myusername;
+```
+- Write your code.
+- To compile the code, simply you can just use `make` command.
+```
+cd users/myusername;
+make;
+```
+
+
 # Technical Explanation
 We have our own protocol.
 
