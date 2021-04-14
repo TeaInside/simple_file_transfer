@@ -96,8 +96,12 @@ sync and close your resources before exit.
 
 
 ## Minimal Working Example
-You can see the minimal working example in `users/ammarfaizi2`. Feel free to ask
-a question via GitHub repository issue.
+You can see the minimal working example in `users/ammarfaizi2`.
+
+
+## Question and Help
+Feel free to ask a question via GitHub repository issue. I will reach you when
+I get the time.
 
 
 # License
