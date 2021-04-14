@@ -7,6 +7,7 @@ will be reviewed by me ([@ammarfaizi2](https://github.com/ammarfaizi2)), you wil
 
 Pull request is welcomed through GitHub repository (https://github.com/TeaInside/simple_file_transfer).
 
+---------
 
 # Task
 You have to write TCP client and TCP server. The goal is simply to transfer a
@@ -40,7 +41,7 @@ cd users/myusername;
 ```sh
 make;
 ```
-
+---------
 
 # Technical Explanation
 We have our own protocol.
