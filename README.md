@@ -81,6 +81,9 @@ Save the file to a relative directory named `uploaded_files` (it is provided in 
 Simply make sure the server doesn't accept a file name that contains `..` (double dots).
 If the client sends a file name that contains this pattern, just close it, don't write anything to the disk.
 
+## Notes
+- If the file name sent by the client is the same with existing file, just overwrite the existing file with it.
+- If the client closes the connection before it finished to transfer all content. Just write the partial bytes the server has received.
 
 # License
 This project is licensed under the GNU GPL v2 license. There are exceptions for
