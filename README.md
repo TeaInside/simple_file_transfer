@@ -8,9 +8,18 @@ will be reviewed by me (@ammarfaizi2), you will get suggestion or feedback.
 Pull request is welcomed through GitHub repository (https://github.com/TeaInside/simple_file_transfer).
 
 
-## What to do?
-((TODO: Write instruction))
+# Task
+You have to write TCP client and TCP server. The goal is to transfer file from
+client to server.
 
+## Protocol
+```c
+typedef struct __attribute__((packed)) packet_t {
+	uint64_t	file_size;
+	uint8_t		file_name_len;
+	char		file_name[0xffu];
+} packet_t;
+```
 
 
 # License
