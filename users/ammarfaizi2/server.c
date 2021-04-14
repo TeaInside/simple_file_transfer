@@ -406,7 +406,8 @@ got_unused:
 	chan->is_used  = true;
 	chan->recv_s   = 0;
 	chan->src_port = src_port;
-	strncpy(chan->src_ip, src_ip, sizeof(chan->src_ip));
+	strncpy(chan->src_ip, src_ip, sizeof(chan->src_ip) - 1);
+	chan->src_ip[sizeof(chan->src_ip) - 1] = '\0';
 	state->av_client--;
 	printf("Accepted connection from " PRWIU "\n", W_IU(chan));
 	epoll_add(state->epoll_fd, cli_fd, EPOLL_INPUT_EVT);
