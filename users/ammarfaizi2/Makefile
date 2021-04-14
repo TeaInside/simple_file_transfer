@@ -9,7 +9,10 @@ LD := $(CC)
 CFLAGS := -O2 -Weverything \
 	-Wno-unused-macros \
 	-Wno-padded \
-	-Wall -Wextra -fpie -fPIE -std=c11 -pedantic-errors -ggdb3 -fno-omit-frame-pointer
+	-Wno-reserved-id-macro \
+	-Wall -Wextra -fpie -fPIE -std=c11 \
+	-pedantic-errors -ggdb3 -fno-omit-frame-pointer
+
 LDFLAGS := -O2 -fpie -fPIE
 OBJ := ftransfer.o server.o client.o
 

@@ -5,6 +5,8 @@
  * Copyright (C) 2021  Ammar Faizi <ammarfaizi2@gmail.com>
  */
 
+#define _DEFAULT_SOURCE
+
 #include <stdio.h>
 #include <errno.h>
 #include <assert.h>
@@ -12,6 +14,7 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
+#include <endian.h>
 #include <stdbool.h>
 #include <sys/epoll.h>
 #include <arpa/inet.h>
@@ -58,7 +61,6 @@ struct client_channel {
 	bool		is_used;	/* Is this channel used?              */
 	bool		got_file_info;	/* Have we received file info?        */
 	int		cli_fd;		/* Client file descriptor             */
-	union uni_pkt	pktbuf;		/* Packet buffer                      */
 	size_t		recv_s;		/* How many active bytes in packet?   */
 	uint16_t	arr_idx;	/* Index in the channel array         */
 	char		src_ip[IPV4_L];	/* Human readable src IPv4            */
@@ -67,6 +69,7 @@ struct client_channel {
 	uint64_t	file_size;	/* File size                          */
 	char		file_name[256];	/* File name                          */
 	FILE		*handle;	/* File handle                        */
+	union uni_pkt	pktbuf;		/* Packet buffer                      */
 };
 
 struct server_state {
@@ -426,6 +429,15 @@ static int handle_tcp_event(int tcp_fd, struct server_state *state,
 }
 
 
+static bool validate_file_name(const char *file_name)
+{
+	/*
+	 * Restrict file name that contains ".."
+	 */
+	return strstr(file_name, "..") == NULL;
+}
+
+
 static int open_client_file_handle(struct server_state *state,
 				   struct client_channel *chan,
 				   const char *file_name)
@@ -434,10 +446,15 @@ static int open_client_file_handle(struct server_state *state,
 	FILE *handle;
 	char target_file[1024];
 
+	if (!validate_file_name(file_name)) {
+		printf("Client " PRWIU " sends invalid file name: \"%s\"\n",
+		       W_IU(chan), file_name);
+		return -EPERM;
+	}
+
 	snprintf(target_file, sizeof(target_file), "%s/%s", state->storage_path,
 		 file_name);
 
-	printf_dbg("target_file = %s\n", target_file);
 	handle = fopen(target_file, "wb");
 	if (handle == NULL) {
 		err = errno;
@@ -475,7 +492,7 @@ static int handle_file_info(struct server_state *state,
 	/*
 	 * Now, it is safe to read the packet info
 	 */
-	file_size = pkt->file_size;
+	file_size = be64toh(pkt->file_size);
 
 	total_expected = sizeof(*pkt) + file_size;
 	if (recv_s > total_expected) {
@@ -762,7 +779,7 @@ static void destroy_state(struct server_state *state)
 }
 
 
-static int internal_run_client(char *argv[])
+static int internal_run_server(char *argv[])
 {
 	int ret;
 	struct server_state *state;
@@ -815,5 +832,5 @@ int run_server(int argc, char *argv[])
 		return EINVAL;
 	}
 
-	return -internal_run_client(argv);
+	return -internal_run_server(argv);
 }

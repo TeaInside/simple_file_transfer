@@ -10,6 +10,22 @@
 
 #include "ftransfer.h"
 
+#define DEBUG			(1)
+#define SEND_BUFFER_SIZE	(0x4000u)
+
+
+struct client_state {
+	int		tcp_fd;
+	const char	*target_file;
+	FILE		*handle;
+};
+
+static int internal_run_client(char *argv[])
+{
+	int ret;
+	struct client_state *state;
+}
+
 
 int run_client(int argc, char *argv[])
 {
@@ -25,9 +41,5 @@ int run_client(int argc, char *argv[])
 		return EINVAL;
 	}
 
-
-	(void)argv;
-	/* Your code here... */
-
-	return 0;
+	return -internal_run_client(argv);
 }
