@@ -2,7 +2,7 @@
 /*
  * Simple file transfer (entry file)
  *
- * Copyright (C) 2021  Your Name <your_email@domain.com>
+ * Copyright (C) 2021  Ammar Faizi <ammarfaizi2@gmail.com>
  */
 
 #include <errno.h>

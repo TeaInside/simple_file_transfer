@@ -2,7 +2,7 @@
 /*
  * Simple file transfer header
  *
- * Copyright (C) 2021  Your Name <your_email@domain.com>
+ * Copyright (C) 2021  Ammar Faizi <ammarfaizi2@gmail.com>
  */
 
 #ifndef FTRANSFER_H
@@ -14,10 +14,12 @@ void print_help(void);
 int run_server(int argc, char *argv[]);
 int run_client(int argc, char *argv[]);
 
-typedef struct packet_t {
-	uint8_t		filename_len;
-	char		filename[0xffu];
+typedef struct __attribute__((packed)) packet_t {
 	uint64_t	file_size;
+	uint8_t		file_name_len;
+	char		file_name[0xffu];
 } packet_t;
+
+
 
 #endif
