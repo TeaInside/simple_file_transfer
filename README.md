@@ -4,7 +4,7 @@ Simple File Transfer is a socket programming exercise written in C language.
 You can submit a pull request after completing the task. Your pull request
 will be reviewed by me ([@ammarfaizi2](https://github.com/ammarfaizi2)), and
 then you will get suggestion, feedback and maybe a request to change something
-before your PR be merged to the main branch.
+before your PR be merged to the master branch.
 
 Note: Target platform is only Linux.
 
