@@ -18,6 +18,7 @@
 #include <string.h>
 #include <endian.h>
 #include <stdbool.h>
+#include <inttypes.h>
 #include <sys/epoll.h>
 #include <arpa/inet.h>
 #include <netinet/tcp.h>
@@ -25,7 +26,7 @@
 #include "ftransfer.h"
 
 
-#define DEBUG			(1)
+#define DEBUG			(0)
 #define MAX_CLIENTS		(100u)
 #define EPOLL_MAP_SIZE		(0xffffu)
 #define EPOLL_MAP_TO_NOP	(0x0u)
@@ -466,7 +467,6 @@ static int open_client_file_handle(struct server_state *state,
 	}
 	setvbuf(handle, NULL, _IOFBF, RECV_BUFFER_SIZE * 2u);
 
-	/* TODO: Print file info */
 	chan->handle = handle;
 	return 0;
 }
@@ -526,6 +526,13 @@ static int handle_file_info(struct server_state *state,
 	ret = open_client_file_handle(state, chan, chan->file_name);
 	if (ret)
 		goto out;
+
+
+	printf("=================================\n");
+	printf("File name: %s\n", chan->file_name);
+	printf("File size: %" PRIu64 "\n", file_size);
+	printf("=================================\n");
+	printf("Receiving file from " PRWIU "...\n", W_IU(chan));
 
 	if (recv_s > sizeof(*pkt)) {
 		/*
@@ -634,7 +641,7 @@ static int handle_client_event(int cli_fd, struct server_state *state,
 	return 0;
 out_close:
 	if (chan->handle != NULL) {
-		printf("Syncing buffer...\n");
+		printf("Syncing buffer to disk...\n");
 		fflush(chan->handle);
 		fclose(chan->handle);
 	}
@@ -758,7 +765,7 @@ static void destroy_state(struct server_state *state)
 		 * received data to the disk.
 		 */
 		if (chan->handle) {
-			printf("Syncing buffer...\n");
+			printf("Syncing buffer to disk...\n");
 			fflush(chan->handle);
 			fclose(chan->handle);
 		}

@@ -26,7 +26,7 @@
 
 #include "ftransfer.h"
 
-#define DEBUG			(1)
+#define DEBUG			(0)
 #define SEND_BUFFER_SIZE	(0x4000u)
 
 #if DEBUG
@@ -138,14 +138,14 @@ static int init_socket(const char *server_addr, uint16_t server_port,
 	addr.sin_port = htons(server_port);
 	addr.sin_addr.s_addr = inet_addr(server_addr);
 
-again:
 	printf("Connecting to %s:%u...\n", server_addr, server_port);
+exec_connect:
 	ret = connect(tcp_fd, (struct sockaddr *)&addr, addr_len);
 	if (ret) {
 		ret = errno;
 		if (ret == EINPROGRESS || ret == EALREADY || ret == EAGAIN) {
 			usleep(10000);
-			goto again;
+			goto exec_connect;
 		}
 
 		printf("Error: connect(): %s\n", strerror(ret));
@@ -256,7 +256,7 @@ static int send_target_file(struct client_state *state)
 				 * buffer is ready again.
 				 *
 				 */
-				printf("Sleeping on poll()...\n");
+				printf_dbg("Sleeping on poll()...\n");
 			exec_poll:
 				ret = poll(fds, 1, 1000);
 				if (state->stop_el)
