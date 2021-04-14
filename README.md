@@ -107,5 +107,14 @@ I get the time.
 
 
 # License
-This project is licensed under the GNU GPL v2 license. There are exceptions for
-several directories, please read license_notice.txt
+This project is licensed under the GNU GPL v2 license. However, there are some
+exceptions. This project was licensed under the MIT license, and people were
+contributing their code under the MIT license.
+
+
+So some user's directories are still licensed under the MIT license. I can't
+change the license without their permission.
+
+### Files that are licensed under the MIT license
+- Any file inside directory `users/aviezab`
+- Any file inside directory `users/rLaps`
