@@ -29,7 +29,7 @@ sudo apt-get install gcc make git -y;
 ## Getting started
 - Fork the GitHub repository.
 - Clone the forked repository.
-- Create your directory by copying the template to `users/<your username>`.
+- Create your directory by copying the template to `users/<your_username>`.
 For example:
 ```sh
 cp -rf template users/myusername;
