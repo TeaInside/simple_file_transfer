@@ -2,12 +2,13 @@
 # Simple File Transfer
 
 Simple File Transfer is a socket programming exercise written in C language.
-Everyone can submit pull request after completing the task. Your pull request
-will be reviewed by me ([@ammarfaizi2](https://github.com/ammarfaizi2)), you will get suggestion or feedback.
+Everyone can submit a pull request after completing the task. Your pull request
+will be reviewed by [@ammarfaizi2](https://github.com/ammarfaizi2), and
+then you will get suggestion and feedback from him.
+
+Supported platform is only Linux.
 
 Pull request is welcomed through GitHub repository (https://github.com/TeaInside/simple_file_transfer).
-
----------
 
 # Task
 You have to write TCP client and TCP server. The goal is simply to transfer a
@@ -41,7 +42,7 @@ cd users/myusername;
 ```sh
 make;
 ```
----------
+
 
 # Technical Explanation
 We have our own protocol.
