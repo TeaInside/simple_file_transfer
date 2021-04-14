@@ -56,12 +56,16 @@ typedef struct __attribute__((packed)) packet_t {
 ```
 
 This struct is sent by the client to server. The file content should be placed after the struct.
-```
+To make a better abstraction, you can use the following union:
+```c
 union uni_pkt {
 	packet_t	packet;
-	char		raw_buf[RECV_BUFFER_SIZE];
+	char		raw_buf[N]; // Feel free to control the N size as your buffer size
 };
 ```
+
+File content should be placed at offset `raw_buf[sizeof(packet_t)]` at the beginning of buffer.
+In the next cycle of receiving file content, you may overwrite it from `&raw_buf[0]`.
 
 
 # License
