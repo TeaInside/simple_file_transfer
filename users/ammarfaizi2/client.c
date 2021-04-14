@@ -188,7 +188,6 @@ static int send_target_file(struct client_state *state)
 	FILE *handle = state->handle;
 	packet_t *pkt = &state->pktbuf.packet;
 	char file_name[0x1000];
-	size_t fread_ret;
 	int err;
 	struct pollfd fds[1];
 
@@ -196,7 +195,7 @@ static int send_target_file(struct client_state *state)
 	file_base_name = basename(file_name);
 
 	errno = 0;
-	file_size= get_file_size(handle);
+	file_size = get_file_size(handle);
 	if (file_size == 0 && errno != 0)
 		return -errno;
 
@@ -220,6 +219,7 @@ static int send_target_file(struct client_state *state)
 	fds[0].revents = 0;
 
 	do {
+		size_t fread_ret;
 		ssize_t send_ret;
 		char *raw_buf = state->pktbuf.raw_buf;
 
