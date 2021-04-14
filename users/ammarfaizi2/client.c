@@ -244,12 +244,16 @@ static int send_target_file(struct client_state *state)
 				int ret;
 				/*
 				 *
-				 * Oops, network is slow, buffer
-				 * is full, can't send() at the moment.
+				 * Oops, the network buffer is full
+				 * because this loop is too fast
+				 * compared to the network speed.
 				 *
-				 * Let's sleep on poll() and wait
-				 * for the kernel to wake me up
-				 * when writing buffer is ready.
+				 * We must wait until the network buffer
+				 * is flushed and is ready for writing.
+				 *
+				 * Let's sleep on poll() and wait for
+				 * the kernel to wake us up when writing
+				 * buffer is ready again.
 				 *
 				 */
 				printf("Sleeping on poll()...\n");
