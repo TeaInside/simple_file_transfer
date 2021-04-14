@@ -82,8 +82,17 @@ Simply make sure the server doesn't accept a file name that contains `..` (doubl
 If the client sends a file name that contains this pattern, just close it, don't write anything to the disk.
 
 ## Notes
-- If the file name sent by the client is the same with existing file, just overwrite the existing file with it.
-- If the client closes the connection before it finished to transfer all content. Just write the partial bytes the server has received.
+- If the file name sent by the client is the same with existing file, just
+overwrite the existing file with it.
+- If the client closes the connection before it finished to transfer all content.
+Write any partial bytes the server has received.
+- Make sure you have no memory leak.
+- Make sure you sync anything to the disk before the program exits.
+- Make sure you close all socket file descriptors before the program exits.
+- You need an interrupt handler to make sure resources are synced and closed properly.
+Catch `SIGINT`, `SIGTERM` and `SIGHUP` in your interrupt handler, and then release
+sync and release any resource before exit.
+- Ignore `SIGPIPE`.
 
 # License
 This project is licensed under the GNU GPL v2 license. There are exceptions for
