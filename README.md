@@ -67,6 +67,12 @@ union uni_pkt {
 File content should be placed at offset `raw_buf[sizeof(packet_t)]` at the beginning of buffer.
 In the next cycle of receiving file content, you may overwrite it from `&raw_buf[0]` with file content.
 
+## Communication Direction
+- The server only `recv()`, it doesn't need to call `send()`.
+- The client only `send()`, it doesn't need to call `recv()`.
+
+Keep it simple as this is a simple file transfer.
+
 
 # License
 This project is licensed under the GNU GPL v2 license. There are exceptions for
