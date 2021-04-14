@@ -14,9 +14,9 @@
 int run_client(int argc, char *argv[])
 {
 	/*
-	 * argv[0] is server address
-	 * argv[1] is server port
-	 * argv[2] is filename
+	 * argv[0] is the server address
+	 * argv[1] is the server port
+	 * argv[2] is the file name
 	 */
 
 	if (argc != 3) {

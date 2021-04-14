@@ -5,7 +5,9 @@
  * Copyright (C) 2021  Ammar Faizi <ammarfaizi2@gmail.com>
  */
 
-#define _DEFAULT_SOURCE
+#ifndef _DEFAULT_SOURCE
+#  define _DEFAULT_SOURCE
+#endif
 
 #include <stdio.h>
 #include <errno.h>
@@ -822,8 +824,8 @@ out:
 int run_server(int argc, char *argv[])
 {
 	/*
-	 * argv[0] is bind address
-	 * argv[1] is bind port
+	 * argv[0] is the bind address
+	 * argv[1] is the bind port
 	 */
 
 	if (argc != 2) {

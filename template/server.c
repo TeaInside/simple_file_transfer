@@ -14,8 +14,8 @@
 int run_server(int argc, char *argv[])
 {
 	/*
-	 * argv[0] is bind address
-	 * argv[1] is bind port
+	 * argv[0] is the bind address
+	 * argv[1] is the bind port
 	 */
 
 	if (argc != 2) {
