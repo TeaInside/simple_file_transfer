@@ -27,7 +27,7 @@ file from client to server.
 ```sh
 sudo apt-get install gcc make git -y;
 ```
-## Make your own program
+## Do the exercise
 - Fork the GitHub repository.
 - Clone your fork repository.
 - Create your directory by copying the template to `users/<your_username>`.
@@ -42,11 +42,8 @@ cd users/myusername;
 make;
 ```
 
-
 # Technical Explanation
-We have our own protocol.
-
-## Protocol
+In this exercise, we have our own protocol. The data structure in this protocol is represented by a struct.
 ```c
 typedef struct __attribute__((packed)) packet_t {
 	uint64_t	file_size;
