@@ -64,7 +64,8 @@ struct client_channel {
 	char		src_ip[IPV4_L];	/* Human readable src IPv4            */
 	uint16_t	src_port;	/* Human readable src port            */
 	uint64_t	recv_file_len;	/* Received file bytes                */
-	char		filename[256];	/* Filename                           */
+	uint64_t	file_size;	/* File size                          */
+	char		file_name[256];	/* File name                          */
 	FILE		*handle;	/* File handle                        */
 };
 
@@ -108,6 +109,7 @@ static inline void reset_client(struct client_channel *chan, uint16_t idx)
 	chan->cli_fd        = -1;
 	chan->recv_s        = 0;
 	chan->arr_idx       = idx;
+	chan->file_size     = 0;
 	chan->recv_file_len = 0;
 	chan->handle        = NULL;
 }
@@ -426,15 +428,16 @@ static int handle_tcp_event(int tcp_fd, struct server_state *state,
 
 static int open_client_file_handle(struct server_state *state,
 				   struct client_channel *chan,
-				   const char *filename)
+				   const char *file_name)
 {
 	int err;
 	FILE *handle;
 	char target_file[1024];
 
 	snprintf(target_file, sizeof(target_file), "%s/%s", state->storage_path,
-		 filename);
+		 file_name);
 
+	printf_dbg("target_file = %s\n", target_file);
 	handle = fopen(target_file, "wb");
 	if (handle == NULL) {
 		err = errno;
@@ -483,22 +486,25 @@ static int handle_file_info(struct server_state *state,
 		 * client has done something totally
 		 * wrong!
 		 */
-		printf("Client " PRWIU " sends invalid packet\n", W_IU(chan));
+		printf("Error: Client " PRWIU " sends invalid packet\n",
+		       W_IU(chan));
 		ret = -EINVAL;
 		goto out;
 	}
 
 
-	memcpy(chan->filename, pkt->filename, pkt->filename_len);
+
+	chan->file_size = pkt->file_size;
+	memcpy(chan->file_name, pkt->file_name, pkt->file_name_len);
 
 	/*
 	 * Ensure null terminator for safety.
 	 */
-	chan->filename[pkt->filename_len] = '\0';
-	chan->filename[sizeof(chan->filename) - 1] = '\0';
+	chan->file_name[pkt->file_name_len] = '\0';
+	chan->file_name[sizeof(chan->file_name) - 1] = '\0';
 	chan->got_file_info = true;
 
-	ret = open_client_file_handle(state, chan, chan->filename);
+	ret = open_client_file_handle(state, chan, chan->file_name);
 	if (ret)
 		goto out;
 
@@ -526,7 +532,30 @@ out:
 static int handle_file_content(struct server_state *state,
 			       struct client_channel *chan, size_t recv_s)
 {
+	FILE *handle;
+	size_t fwrite_ret;
 
+	handle     = chan->handle;
+	fwrite_ret = fwrite(chan->pktbuf.raw_buf, sizeof(char), recv_s, handle);
+	if (fwrite_ret != recv_s) {
+		int ret = ferror(handle);
+		if (ret != 0) {
+			clearerr(handle);
+			printf("Error: fwrite(): %s\n", strerror(ret));
+			return -ret;
+		}
+	}
+	chan->recv_s = 0;
+	chan->recv_file_len += fwrite_ret;
+
+	if (chan->recv_file_len >= chan->file_size) {
+		printf("File received completely from " PRWIU "\n",
+		       W_IU(chan));
+		return -EALREADY;
+	}
+
+	(void)state;
+	return 0;
 }
 
 
@@ -585,11 +614,12 @@ static int handle_client_event(int cli_fd, struct server_state *state,
 
 	return 0;
 out_close:
-	printf("Closing connection from " PRWIU "...\n", W_IU(chan));
 	if (chan->handle != NULL) {
+		printf("Syncing buffer...\n");
 		fflush(chan->handle);
 		fclose(chan->handle);
 	}
+	printf("Closing connection from " PRWIU "...\n", W_IU(chan));
 	state->av_client++;
 	state->epoll_map[cli_fd] = EPOLL_MAP_TO_NOP;
 	epoll_delete(state->epoll_fd, cli_fd);
@@ -695,6 +725,27 @@ static void destroy_state(struct server_state *state)
 {
 	int tcp_fd = state->tcp_fd;
 	int epoll_fd = state->epoll_fd;
+	struct client_channel *chan, *chans = state->chans;
+
+	for (uint16_t i = 0; i < MAX_CLIENTS; i++) {
+		chan = &chans[i];
+		if (!chan->is_used)
+			continue;
+
+		/*
+		 * We have active client here.
+		 *
+		 * Let's disconnect it and sync any
+		 * received data to the disk.
+		 */
+		if (chan->handle) {
+			printf("Syncing buffer...\n");
+			fflush(chan->handle);
+			fclose(chan->handle);
+		}
+		close(chan->cli_fd);
+		printf("Closing connection from " PRWIU "...\n", W_IU(chan));
+	}
 
 	if (tcp_fd != -1) {
 		printf("Closing tcp_fd (%d)...\n", tcp_fd);
