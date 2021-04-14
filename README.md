@@ -94,6 +94,12 @@ Catch `SIGINT`, `SIGTERM` and `SIGHUP` in your interrupt handler, and then
 sync and close your resources before exit.
 - Ignore `SIGPIPE`.
 
+
+## Minimal Working Example
+You can see minimal working example in `users/ammarfaizi2`. Feel free to ask
+a question if you have via GitHub repository issue.
+
+
 # License
 This project is licensed under the GNU GPL v2 license. There are exceptions for
 several directories, please read license_notice.txt
