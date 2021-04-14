@@ -55,6 +55,14 @@ typedef struct __attribute__((packed)) packet_t {
 } packet_t;
 ```
 
+This struct is sent by the client to server. The file content should be placed after the struct.
+```
+union uni_pkt {
+	packet_t	packet;
+	char		raw_buf[RECV_BUFFER_SIZE];
+};
+```
+
 
 # License
 This project is licensed under the GNU GPL v2 license. There are exceptions for
