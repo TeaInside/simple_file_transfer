@@ -116,5 +116,5 @@ So some user's directories are still licensed under the MIT license. I can't
 change the license without their permission.
 
 ### Files that are licensed under the MIT license
-- Any file inside directory `users/aviezab`
-- Any file inside directory `users/rLaps`
+- Any file in directory `users/aviezab`
+- Any file in directory `users/rLaps`
