@@ -27,18 +27,37 @@ print_help(FILE *f)
 }
 
 void
-print_progress(const char *label, uint64_t i, uint64_t total)
+print_progress(uint64_t i, uint64_t total)
 {
 
 	uint8_t per = (i * 100) / total;
 
-	printf("\r%s %lu bytes -> %lu bytes [%u%%]",
-			label, i, total, per);
+	printf("\r%lu bytes -> %lu bytes [%u%%]", i, total, per);
 
 	fflush(stdout);
 
 	if (per == 100)
 		printf(" - " WHITE_BOLD_E "Done!" END_E "\n");
+}
+
+int
+init_socket(struct sockaddr_in *sock, const char *addr, const uint16_t port)
+{
+	int socket_d = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+	if (socket_d < 0)
+		goto err;
+
+	memset(sock, 0, sizeof(struct sockaddr_in));
+
+	/* TCP configuration */
+	sock->sin_family      = AF_INET;
+	sock->sin_addr.s_addr = inet_addr(addr);
+	sock->sin_port        = htons(port);
+
+	return socket_d;
+
+err:
+	return -1;
 }
 
 

@@ -9,7 +9,7 @@ LD := $(CC)
 CFLAGS := -Os -Wall -Wextra -fpie -fPIE -std=c99 \
 	  -pedantic-errors -ggdb3 -fno-omit-frame-pointer
 LDFLAGS := -Os -fpie -fPIE
-OBJ := ftransfer.o server.o client.o util.o
+OBJ := ftransfer.o server.o client.o
 
 
 all: ftransfer
@@ -22,9 +22,6 @@ server.o: server.c ftransfer.h
 
 client.o: client.c ftransfer.h
 	$(CC) $(CFLAGS) -c -o $(@) $(<)
-
-util.o: util.c util.h
-	$(CC) $(CFLAGS) -c -o ${@} $(<)
 
 ftransfer.o: ftransfer.c ftransfer.h
 	$(CC) $(CFLAGS) -c -o $(@) $(<)
