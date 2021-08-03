@@ -57,11 +57,11 @@ get_file_prop(packet_t *pkt, char *argv[])
 	base_name = basename(argv[2]);
 	f_len	  = strlen(base_name);
 
-	pkt->file_size     = s.st_size;
-	pkt->file_name_len = f_len;
+	pkt->file_size     = (uint64_t)s.st_size;
+	pkt->file_name_len = (uint8_t)f_len;
 
-	memcpy(pkt->file_name, base_name, f_len);
-	pkt->file_name[f_len] = '\0';
+	memcpy(pkt->file_name, base_name, (size_t)pkt->file_name_len);
+	pkt->file_name[pkt->file_name_len] = '\0';
 }
 
 static FILE *
@@ -175,7 +175,7 @@ run_client(int argc, char *argv[])
 	puts(WHITE_BOLD_E "File info" END_E);
 	printf("|-> Full path   : %s (%zu)\n",	full_path,	strlen(full_path));
 	printf("|-> File name   : %s (%u)\n",	pkt.file_name,	pkt.file_name_len);
-	printf("|-> File size   : %zu bytes\n", pkt.file_size			 );
+	printf("|-> File size   : %lu bytes\n", pkt.file_size			 );
 	printf("`-> Destination : %s:%s\n",	argv[0],	argv[1]		 );
 
 	file	 = open_file(full_path);
