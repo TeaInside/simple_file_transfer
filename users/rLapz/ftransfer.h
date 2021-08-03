@@ -21,6 +21,8 @@ typedef struct __attribute__((packed)) packet_t {
 
 void print_help(FILE *f);
 void print_progress(const char *label, uint64_t i, uint64_t total);
+int  init_socket(struct sockaddr_in *sock,
+			const char *addr, const uint16_t port);
 int  run_client(int argc, char *argv[]);
 int  run_server(int argc, char *argv[]);
 

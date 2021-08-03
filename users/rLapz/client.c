@@ -8,7 +8,6 @@
  */
 
 #include <errno.h>
-#include <fcntl.h>
 #include <libgen.h>
 #include <signal.h>
 #include <stdio.h>
@@ -17,23 +16,20 @@
 #include <unistd.h>
 
 #include <arpa/inet.h>
-#include <sys/types.h>
-#include <sys/socket.h>
 #include <sys/stat.h>
 
 #include "ftransfer.h"
-#include "util.h"
 
 /* function declarations */
 static void  interrupt_handler	(int sig);
-static void  get_file_prop	(packet_t *pkt, char *argv[]);
+static int   get_file_prop	(packet_t *pkt, char *argv[]);
 static FILE *open_file		(const char *file_name);
-static int   init_socket	(const char *addr, uint16_t port);
-static int   send_packet	(const int client_d, FILE *file,
-					const packet_t *prop);
+static int   init_client	(const char *addr, const uint16_t port);
+static int   send_packet	(const int client_d, const packet_t *prop,
+					const char *file_name);
 int          run_client		(int argc, char *argv[]);
 
-/* global variable */
+/* global variables */
 static volatile int interrupted = 0;
 
 
@@ -42,25 +38,31 @@ static void
 interrupt_handler(int sig)
 {
 	interrupted = 1;
+	errno       = EINTR;
 	(void)sig;
 }
 
-static void
+static int
 get_file_prop(packet_t *pkt, char *argv[])
 {
 	const char *base_name;
+	char       *full_path;
 	struct      stat s;
 	size_t      f_len;
 
-	if (stat(argv[2], &s) < 0)
-		goto err;
-
-	if (S_ISDIR(s.st_mode)) {
-		errno = EISDIR;
+	if (stat(argv[2], &s) < 0) {
+		perror(argv[2]);
 		goto err;
 	}
 
-	base_name = basename(argv[2]);
+	if (S_ISDIR(s.st_mode)) {
+		errno = EISDIR;
+		perror(argv[2]);
+		goto err;
+	}
+
+	full_path = argv[2];
+	base_name = basename(full_path);
 	f_len	  = strlen(base_name);
 
 	pkt->file_size     = (uint64_t)s.st_size;
@@ -68,10 +70,17 @@ get_file_prop(packet_t *pkt, char *argv[])
 
 	memcpy(pkt->file_name, base_name, (size_t)pkt->file_name_len);
 	pkt->file_name[pkt->file_name_len] = '\0';
-	return;
+
+	puts(WHITE_BOLD_E "File info" END_E);
+	printf("|-> Full path   : %s (%zu)\n",	full_path, strlen(full_path));
+	printf("|-> File name   : %s (%u)\n",	pkt->file_name,	pkt->file_name_len);
+	printf("|-> File size   : %lu bytes\n", pkt->file_size);
+	printf("`-> Destination : %s:%s\n",	argv[0], argv[1]);
+
+	return 0;
 
 err:
-	die("\"%s\" :", argv[2]);
+	return -errno;
 }
 
 static FILE *
@@ -79,74 +88,94 @@ open_file(const char *file_name)
 {
 	FILE *f = fopen(file_name, "r");
 	if (f == NULL)
-		die("open_file():");
+		perror(file_name);
 
 	return f;
 }
 
 static int
-init_socket(const char *addr, uint16_t port)
+init_client(const char *addr, const uint16_t port)
 {
-	int socket_d = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-	if (socket_d < 0)
-		goto err1;
+	int socket_d;
+	struct sockaddr_in sock;
 
-	struct sockaddr_in srv = {
-		.sin_family	 = AF_INET,
-		.sin_addr.s_addr = inet_addr(addr),
-		.sin_port	 = htons(port),
-		.sin_zero	 = {0}
-	};
+	socket_d = init_socket(&sock, addr, port);
+	if (socket_d < 0) {
+		perror("socket:");
+		goto err1;
+	}
 
 	printf("\nConnecting...");
 	fflush(stdout);
 
-	if (connect(socket_d, (struct sockaddr *)&srv, sizeof(srv)) < 0)
+	if (connect(socket_d, (struct sockaddr *)&sock, sizeof(sock)) < 0) {
+		perror("\nconnect");
 		goto err0;
+	}
 
 	puts("\rConnected to the server!\n");
-
 	return socket_d;
 
 err0:
 	close(socket_d);
+
 err1:
-	puts("\r\n");
+	puts("\r");
 	return -errno;
 }
 
 static int
-send_packet(const int client_d, FILE *file, const packet_t *prop)
+send_packet(const int client_d, const packet_t *prop, const char *file_name)
 {
+	FILE	*file;
 	ssize_t  send_bytes;
 	size_t	 read_bytes;
 	uint64_t bytes_sent = 0;
-	char	 content[BUFFER_SIZE] = {0};
+	char	 content[BUFFER_SIZE];
 
 	/* send file properties */
 	send_bytes = send(client_d, prop, sizeof(packet_t), 0);
-	if (send_bytes < 0)
-		goto err;
+	if (send_bytes < 0) {
+		perror("send");
+		goto err1;
+	}
+
+	file = open_file(file_name);
+	if (file == NULL) {
+		perror("open_file");
+		goto err1;
+	}
 
 	/* send the packet */
-	while (bytes_sent < (prop->file_size) && interrupted != 1) {
-		read_bytes = fread(content, 1, BUFFER_SIZE, file);
+	while (bytes_sent < (prop->file_size) && !feof(file)) {
+		read_bytes = fread(&content[0], 1, BUFFER_SIZE, file);
+		if (ferror(file)) {
+			perror("\nfread");
+			goto err0;
+		}
+		
 		send_bytes = send(client_d, content, read_bytes, 0);
-		if (send_bytes < 0)
-			break;
+		if (send_bytes < 0) {
+			perror("\nsend");
+			goto err0;
+		}
 
 		bytes_sent += (uint64_t)send_bytes;
 
 		print_progress("Sending...", bytes_sent, prop->file_size);
-	}
-	putchar('\n');
 
-	if (errno != 0)
-		goto err;
+		if (interrupted == 1)
+			goto err0;
+	}
 
 	return 0;
 
-err:
+err0:
+	fflush(file);
+	fclose(file);
+
+err1:
+	putchar('\n');
 	return -errno;
 }
 
@@ -165,51 +194,40 @@ run_client(int argc, char *argv[])
 		return -errno;
 	}
 
-/* ---------------------------------------------- */
-
-	packet_t	 pkt;
-	FILE		*file;
-	int		 socket_d, s_packet;
-	const char	*full_path = argv[2];
-
-	memset(&pkt, 0, sizeof(packet_t));
+	packet_t    pkt;
+	int	    socket_d  = 0,
+		    packet_i  = 0;
 
 	signal(SIGINT,	interrupt_handler);
 	signal(SIGTERM,	interrupt_handler);
 	signal(SIGHUP,	interrupt_handler);
 	signal(SIGPIPE,	SIG_IGN		 );
 
-	get_file_prop(&pkt, argv);
+	memset(&pkt, 0, sizeof(packet_t));
 
-	puts(WHITE_BOLD_E "File info" END_E);
-	printf("|-> Full path   : %s (%zu)\n",	full_path,	strlen(full_path));
-	printf("|-> File name   : %s (%u)\n",	pkt.file_name,	pkt.file_name_len);
-	printf("|-> File size   : %lu bytes\n", pkt.file_size			 );
-	printf("`-> Destination : %s:%s\n",	argv[0],	argv[1]		 );
+	printf(WHITE_BOLD_E "Client started\n" END_E);
+	printf(WHITE_BOLD_E "Buffer size: %u\n\n" END_E, BUFFER_SIZE);
 
-	file	 = open_file(full_path);
-	socket_d = init_socket(argv[0], (uint16_t)atoi(argv[1]));
-	if (socket_d < 0)
-		goto cleanup1;
+	if (get_file_prop(&pkt, argv) < 0)
+		goto err;
 
-	s_packet = send_packet(socket_d, file, &pkt);
-	if (s_packet < 0)
-		goto cleanup0;
+	if ((socket_d = init_client(argv[0], (uint16_t)atoi(argv[1]))) < 0)
+		goto err;
 
-cleanup0:
+	if ((packet_i = send_packet(socket_d, &pkt, argv[2])) < 0)
+		goto cleanup;
+
+cleanup:
 	close(socket_d);
-
-cleanup1:
-	fclose(file);
 
 	if (errno != 0)
 		goto err;
 
 	puts("uWu :3");
-
 	return 0;
 
 err:
-	fprintf(stderr, "Failed! : %s\n", strerror(errno));
+	fputs("Failed! :(\n", stderr);
 	return -errno;
 }
+
