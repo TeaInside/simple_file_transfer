@@ -18,11 +18,6 @@ typedef struct packet_t {
 	char     file_name[255];
 } packet_t;
 
-union uni_pkt {
-	packet_t packet;
-	char	 content[BUFFER_SIZE];
-};
-
 
 void print_help(FILE *f);
 void print_progress(const char *label, uint64_t i, uint64_t total);
