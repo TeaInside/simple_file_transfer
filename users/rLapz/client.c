@@ -1,13 +1,16 @@
-/* @author rLapz <arthurlapz@gmail.com>
- * @license MIT
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * Simple file transfer client
  *
- * This is part of simple_file_transfer
- * https://github.com/teainside/simple_file_transfer
+ * Copyright (C) 2021  Arthur Lapz <rlapz@gnuweeb.org>
  *
- * NOTE: true = 0, false = 1
+ * NOTE: true = 1, false = 0
  */
 
+#include <errno.h>
 #include <fcntl.h>
+#include <libgen.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -18,195 +21,186 @@
 #include <sys/socket.h>
 #include <sys/stat.h>
 
-/* local include */
-#include "data_structure.h"
-
-/* macros */
-#define TRUE	0
-#define FALSE	1
+#include "ftransfer.h"
+#include "util.h"
 
 /* function declarations */
-static int inet_handler(const char* address,
-		uint16_t port, const char* filename);
-static char * get_basename(const char *path);
+static void  interupt_handler (int sig);
+static void  get_file_prop    (packet_t *pkt, char *argv[]);
+static FILE *open_file        (const char *file_name);
+static int   init_socket      (const char *addr, uint16_t port);
+static int   send_packet      (const int client_d, FILE *file, const packet_t *prop);
+int          run_client       (int argc, char *argv[]);
 
-/* global variable declarations */
-/* anyway, there is no global variable here, yay! */
+/* global variable */
+static volatile int interrupted = 0;
 
 
-int
-main(int argc, char *argv[])
+/* function implementations */
+static void
+interupt_handler(int sig)
 {
-	if (argc < 4) {
-		printf("Usage:\n\t%s [address] [port] [file_target]\n", argv[0]);
-		return EXIT_FAILURE;
-	}
-
-	return inet_handler(argv[1], (uint16_t)atoi(argv[2]), argv[3]);
+	interrupted = 1;
+	(void)sig;
 }
 
-/* function for handling internet connection
- * and file i/o operations.
- * sadly, not written into separated function, yet!
- */
-static int
-inet_handler(const char* address,
-		uint16_t port, const char* filename)
+static void
+get_file_prop(packet_t *pkt, char *argv[])
 {
-	struct stat s_file	= {0};
-	struct sockaddr_in server = {0};
+	char	*base_name;
+	struct	 stat s;
+	size_t	 f_len;
 
-	short int is_error	= FALSE;
-	int client_fd		= 0;
-	int file_fd		= 0;
-	ssize_t read_bytes	= 0;
-	ssize_t send_bytes	= 0;
-	size_t sent_bytes	= 0;
-	/* why heap? because I need flexible memory size, though. */
-	char *data_arena	= NULL;
-	char *data_arena_tmp	= NULL;
-	packet *packet_data	= NULL;
-	char *basename		= NULL;
-	
+	if (stat(argv[2], &s) < 0)
+		die("\"%s\" :", argv[2]);
 
-	data_arena = calloc(sizeof(packet), sizeof(packet));
-	if (data_arena == NULL) {
-		perror("Allocation data_arena");
-		is_error = TRUE;
-		return EXIT_FAILURE;
-	}
-	packet_data = (packet*)data_arena;
+	base_name = basename(argv[2]);
+	f_len	  = strlen(base_name);
 
-	/* file checking */
-	if (stat(filename, &s_file) < 0) {
-		perror(filename);
-		is_error = TRUE;
-		goto cleanup;
-	}
+	pkt->file_size     = s.st_size;
+	pkt->file_name_len = f_len;
 
-	/*
-	 * set file properties
-	 */
+	memcpy(pkt->file_name, base_name, f_len);
+	pkt->file_name[f_len] = '\0';
+}
 
-	/* get basename of a file */
-	basename = get_basename(filename);
-	if (strlen(basename) == 0) {
-		fprintf(stderr, "File/path invalid\n");
-		is_error = TRUE;
-		goto cleanup;
-	}
+static FILE *
+open_file(const char *file_name)
+{
+	FILE *f = fopen(file_name, "r");
+	if (f == NULL)
+		die("open_file():");
 
-	strncpy(packet_data->filename, basename, sizeof(packet_data->filename));
-	packet_data->filename_len = (uint8_t)strlen(basename);
-	packet_data->file_size = (uint64_t)s_file.st_size;
+	return f;
+}
 
-	/* print file properties */
-	puts("\nFile info: ");
-	printf(" -> File name\t\t: %s\n", packet_data->filename);
-	printf(" -> File name length:\t: %d\n", packet_data->filename_len);
-	printf(" -> File size\t\t: %zu bytes\n", packet_data->file_size);
-	printf(" -> Send to\t\t: %s:%d\n", address, port);
+static int
+init_socket(const char *addr, uint16_t port)
+{
+	int socket_d = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+	if (socket_d < 0)
+		goto err1;
 
-	/* Create socket */
-	client_fd = socket(AF_INET, SOCK_STREAM, 0);
-	if (client_fd < 0) {
-		perror("Create socket");
-		is_error = TRUE;
-		goto cleanup;
-	}
+	struct sockaddr_in srv = {
+		.sin_family	 = AF_INET,
+		.sin_addr.s_addr = inet_addr(addr),
+		.sin_port	 = htons(port),
+		.sin_zero	 = {0}
+	};
 
-	/* TCP configuration */
-	server.sin_addr.s_addr = inet_addr(address);
-	server.sin_family = AF_INET;
-	server.sin_port = (uint16_t)htons(port);
+	printf("\nConnecting...");
 
-	/* let's connect to server, yay! */
-	if (connect(client_fd, (struct sockaddr*)&server,
-			sizeof(server)) < 0) {
-		perror("Connect to server");
-		is_error = TRUE;
-		goto cleanup;
-	}
+	if (connect(socket_d, (struct sockaddr *)&srv, sizeof(srv)) < 0)
+		goto err0;
+
+	fflush(stdout);
+	puts("\rConnected to the server!\n");
+
+	return socket_d;
+
+err0:
+	close(socket_d);
+err1:
+	perror("init_socket()");
+	return -errno;
+}
+
+static int
+send_packet(const int client_d, FILE *file, const packet_t *prop)
+{
+	ssize_t  send_bytes;
+	size_t	 read_bytes;
+	uint64_t bytes_sent = 0;
+	char	 content[BUFFER_SIZE] = {0};
 
 	/* send file properties */
-	send_bytes = send(client_fd, packet_data, BUFFER_SIZE, 0);
-	if (send_bytes < 0) {
-		perror("Send data");
-		is_error = TRUE;
-		goto cleanup;
-	}
-	send_bytes = 0; /* reset */
+	send_bytes = send(client_d, prop, sizeof(packet_t), 0);
+	if (send_bytes < 0)
+		goto err;
 
-	/* reallocation memory size */
-	data_arena_tmp = realloc(data_arena, sizeof(packet) + packet_data->file_size);
-	if (data_arena_tmp == NULL) {
-		perror("Allocation data_arena_tmp");
-		is_error = TRUE;
-		goto cleanup;
-	}
-
-	data_arena = data_arena_tmp;
-	packet_data = (packet*)data_arena;
-
-	puts("\nSending file...");
-
-	/* openning file target */
-	file_fd = open(filename, O_RDONLY, 0);
-	if (file_fd < 0) {
-		perror("Open file");
-		is_error = TRUE;
-		goto cleanup;
-	}
-
-	/* send file to server */
-	while (sent_bytes < (packet_data->file_size)) {
-		/* read bytes from file */
-		read_bytes = read(file_fd, packet_data->content, READ_FILE_BUF);
-		if (read_bytes < 0) {
-			perror("Read file");
-			is_error = TRUE;
+	/* send the packet */
+	while (bytes_sent < (prop->file_size) && interrupted != 1) {
+		read_bytes = fread(content, 1, BUFFER_SIZE, file);
+		send_bytes = send(client_d, content, read_bytes, 0);
+		if (send_bytes < 0)
 			break;
-		}
 
-		/* send bytes data to server */
-		send_bytes = send(client_fd, packet_data->content, (size_t)read_bytes, 0);
-		if (send_bytes < 0) {
-			perror("Send file");
-			is_error = TRUE;
-			break;
-		}
-		sent_bytes += (size_t)read_bytes;
+		bytes_sent += (uint64_t)send_bytes;
 
-		/*
-		printf("Sent bytes: %lu\n", sent_bytes);
-		usleep(800);
-		*/
+		print_progress("Sending...", bytes_sent, prop->file_size);
+		sleep(1);
 	}
+	putchar('\n');
 
-cleanup:
-	free(basename);
-	free(data_arena);
-	if (client_fd > 0)
-		close(client_fd);
-	if (file_fd > 0)
-		close(file_fd);
-	if (is_error == TRUE) {
-		puts("\nFailed :( \n");
-		return EXIT_FAILURE;
-	}
-	puts("\nDone, uWu :3\n");
+	if (errno != 0)
+		goto err;
 
-	return EXIT_SUCCESS;
+	return 0;
+
+err:
+	return -errno;
 }
 
-/* function for generate basename of a file */
-/* because we need 'real' filename not fullpath */
-static char *
-get_basename(const char *path)
+int
+run_client(int argc, char *argv[])
 {
-	char *str = strrchr(path, '/');
-	if (str == NULL)
-		return strdup(path);
+	/*
+	 * argv[0] is the server address
+	 * argv[1] is the server port
+	 * argv[2] is the file name
+	 */
 
-	return strdup(str +1);
+	if (argc != 3) {
+		errno = EINVAL;
+		print_help(stderr);
+		return -errno;
+	}
+
+/* ---------------------------------------------- */
+
+	packet_t	 pkt;
+	FILE		*file;
+	int		 socket_d, s_packet;
+	const char	*full_path = argv[2];
+
+	signal(SIGINT,	interupt_handler);
+	signal(SIGTERM,	interupt_handler);
+	signal(SIGHUP,	interupt_handler);
+	signal(SIGPIPE,	SIG_IGN		);
+
+	memset(&pkt, 0, sizeof(packet_t));
+
+	get_file_prop(&pkt, argv);
+
+	puts(WHITE_BOLD_E "File info" END_E);
+	printf("|-> Full path   : %s (%zu)\n",	full_path,	strlen(full_path));
+	printf("|-> File name   : %s (%u)\n",	pkt.file_name,	pkt.file_name_len);
+	printf("|-> File size   : %zu bytes\n", pkt.file_size			 );
+	printf("`-> Destination : %s:%s\n",	argv[0],	argv[1]		 );
+
+	file	 = open_file(full_path);
+	socket_d = init_socket(argv[0], (uint16_t)atoi(argv[1]));
+	if (socket_d < 0)
+		goto cleanup1;
+
+	s_packet = send_packet(socket_d, file, &pkt);
+	if (s_packet < 0)
+		goto cleanup0;
+
+cleanup0:
+	close(socket_d);
+
+cleanup1:
+	fclose(file);
+
+	if (errno != 0)
+		goto err;
+
+	puts("uWu :3");
+
+	return 0;
+
+err:
+	fprintf(stderr, "Failed! : %s\n", strerror(errno));
+	return -errno;
 }
