@@ -48,12 +48,17 @@ interrupt_handler(int sig)
 static void
 get_file_prop(packet_t *pkt, char *argv[])
 {
-	char	*base_name;
-	struct	 stat s;
-	size_t	 f_len;
+	const char *base_name;
+	struct      stat s;
+	size_t      f_len;
 
 	if (stat(argv[2], &s) < 0)
-		die("\"%s\" :", argv[2]);
+		goto err;
+
+	if (S_ISDIR(s.st_mode)) {
+		errno = EISDIR;
+		goto err;
+	}
 
 	base_name = basename(argv[2]);
 	f_len	  = strlen(base_name);
@@ -63,6 +68,10 @@ get_file_prop(packet_t *pkt, char *argv[])
 
 	memcpy(pkt->file_name, base_name, (size_t)pkt->file_name_len);
 	pkt->file_name[pkt->file_name_len] = '\0';
+	return;
+
+err:
+	die("\"%s\" :", argv[2]);
 }
 
 static FILE *
