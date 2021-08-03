@@ -128,7 +128,6 @@ send_packet(const int client_d, FILE *file, const packet_t *prop)
 		bytes_sent += (uint64_t)send_bytes;
 
 		print_progress("Sending...", bytes_sent, prop->file_size);
-		sleep(1);
 	}
 	putchar('\n');
 
@@ -166,7 +165,7 @@ run_client(int argc, char *argv[])
 	signal(SIGINT,	interrupt_handler);
 	signal(SIGTERM,	interrupt_handler);
 	signal(SIGHUP,	interrupt_handler);
-	signal(SIGPIPE,	SIG_IGN		);
+	signal(SIGPIPE,	SIG_IGN		 );
 
 	memset(&pkt, 0, sizeof(packet_t));
 
