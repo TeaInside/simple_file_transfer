@@ -29,7 +29,8 @@ static void  interrupt_handler	(int sig);
 static void  get_file_prop	(packet_t *pkt, char *argv[]);
 static FILE *open_file		(const char *file_name);
 static int   init_socket	(const char *addr, uint16_t port);
-static int   send_packet	(const int client_d, FILE *file, const packet_t *prop);
+static int   send_packet	(const int client_d, FILE *file,
+					const packet_t *prop);
 int          run_client		(int argc, char *argv[]);
 
 /* global variable */
@@ -89,11 +90,11 @@ init_socket(const char *addr, uint16_t port)
 	};
 
 	printf("\nConnecting...");
+	fflush(stdout);
 
 	if (connect(socket_d, (struct sockaddr *)&srv, sizeof(srv)) < 0)
 		goto err0;
 
-	fflush(stdout);
 	puts("\rConnected to the server!\n");
 
 	return socket_d;
@@ -101,7 +102,7 @@ init_socket(const char *addr, uint16_t port)
 err0:
 	close(socket_d);
 err1:
-	perror("init_socket()");
+	puts("\r\n");
 	return -errno;
 }
 
@@ -162,12 +163,12 @@ run_client(int argc, char *argv[])
 	int		 socket_d, s_packet;
 	const char	*full_path = argv[2];
 
+	memset(&pkt, 0, sizeof(packet_t));
+
 	signal(SIGINT,	interrupt_handler);
 	signal(SIGTERM,	interrupt_handler);
 	signal(SIGHUP,	interrupt_handler);
 	signal(SIGPIPE,	SIG_IGN		 );
-
-	memset(&pkt, 0, sizeof(packet_t));
 
 	get_file_prop(&pkt, argv);
 
