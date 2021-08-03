@@ -1,4 +1,2 @@
 *.o
-client
-server
-
+ftransfer

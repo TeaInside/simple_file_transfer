@@ -1,8 +1,34 @@
-CC=tcc
+# SPDX-License-Identifier: GPL-2.0
 
-all:
-	$(CC) -Wall -Wextra -pedantic -g client.c -o client
-	$(CC) -Wall -Wextra -pedantic -g server.c -o server
+#
+# Want to change the compiler?
+#   `make CC=clang`
+#
+CC := tcc
+LD := $(CC)
+CFLAGS := -O2 -Wall -Wextra -fpie -fPIE -std=c99 -ggdb3 -fno-omit-frame-pointer
+LDFLAGS := -O2 -fpie -fPIE
+OBJ := ftransfer.o server.o client.o util.o
+
+
+all: ftransfer
 
 clean:
-	rm -rf client server
+	rm -vf ftransfer $(OBJ)
+
+server.o: server.c ftransfer.h
+	$(CC) $(CFLAGS) -c -o $(@) $(<)
+
+client.o: client.c ftransfer.h
+	$(CC) $(CFLAGS) -c -o $(@) $(<)
+
+util.o: util.c util.h
+	$(CC) $(CFLAGS) -c -o ${@} $(<)
+
+ftransfer.o: ftransfer.c ftransfer.h
+	$(CC) $(CFLAGS) -c -o $(@) $(<)
+
+ftransfer: $(OBJ)
+	$(LD) $(LDFLAGS) -o $(@) $(^)
+
+.PHONY: all clean
