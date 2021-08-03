@@ -29,7 +29,8 @@ static void  interrupt_handler	(int sig);
 static void  get_file_prop	(packet_t *pkt, char *argv[]);
 static FILE *open_file		(const char *file_name);
 static int   init_socket	(const char *addr, uint16_t port);
-static int   send_packet	(const int client_d, FILE *file, const packet_t *prop);
+static int   send_packet	(const int client_d, FILE *file,
+					const packet_t *prop);
 int          run_client		(int argc, char *argv[]);
 
 /* global variable */
@@ -47,21 +48,30 @@ interrupt_handler(int sig)
 static void
 get_file_prop(packet_t *pkt, char *argv[])
 {
-	char	*base_name;
-	struct	 stat s;
-	size_t	 f_len;
+	const char *base_name;
+	struct      stat s;
+	size_t      f_len;
 
 	if (stat(argv[2], &s) < 0)
-		die("\"%s\" :", argv[2]);
+		goto err;
+
+	if (S_ISDIR(s.st_mode)) {
+		errno = EISDIR;
+		goto err;
+	}
 
 	base_name = basename(argv[2]);
 	f_len	  = strlen(base_name);
 
-	pkt->file_size     = s.st_size;
-	pkt->file_name_len = f_len;
+	pkt->file_size     = (uint64_t)s.st_size;
+	pkt->file_name_len = (uint8_t)f_len;
 
-	memcpy(pkt->file_name, base_name, f_len);
-	pkt->file_name[f_len] = '\0';
+	memcpy(pkt->file_name, base_name, (size_t)pkt->file_name_len);
+	pkt->file_name[pkt->file_name_len] = '\0';
+	return;
+
+err:
+	die("\"%s\" :", argv[2]);
 }
 
 static FILE *
@@ -89,11 +99,11 @@ init_socket(const char *addr, uint16_t port)
 	};
 
 	printf("\nConnecting...");
+	fflush(stdout);
 
 	if (connect(socket_d, (struct sockaddr *)&srv, sizeof(srv)) < 0)
 		goto err0;
 
-	fflush(stdout);
 	puts("\rConnected to the server!\n");
 
 	return socket_d;
@@ -101,7 +111,7 @@ init_socket(const char *addr, uint16_t port)
 err0:
 	close(socket_d);
 err1:
-	perror("init_socket()");
+	puts("\r\n");
 	return -errno;
 }
 
@@ -128,7 +138,6 @@ send_packet(const int client_d, FILE *file, const packet_t *prop)
 		bytes_sent += (uint64_t)send_bytes;
 
 		print_progress("Sending...", bytes_sent, prop->file_size);
-		sleep(1);
 	}
 	putchar('\n');
 
@@ -163,19 +172,19 @@ run_client(int argc, char *argv[])
 	int		 socket_d, s_packet;
 	const char	*full_path = argv[2];
 
+	memset(&pkt, 0, sizeof(packet_t));
+
 	signal(SIGINT,	interrupt_handler);
 	signal(SIGTERM,	interrupt_handler);
 	signal(SIGHUP,	interrupt_handler);
-	signal(SIGPIPE,	SIG_IGN		);
-
-	memset(&pkt, 0, sizeof(packet_t));
+	signal(SIGPIPE,	SIG_IGN		 );
 
 	get_file_prop(&pkt, argv);
 
 	puts(WHITE_BOLD_E "File info" END_E);
 	printf("|-> Full path   : %s (%zu)\n",	full_path,	strlen(full_path));
 	printf("|-> File name   : %s (%u)\n",	pkt.file_name,	pkt.file_name_len);
-	printf("|-> File size   : %zu bytes\n", pkt.file_size			 );
+	printf("|-> File size   : %lu bytes\n", pkt.file_size			 );
 	printf("`-> Destination : %s:%s\n",	argv[0],	argv[1]		 );
 
 	file	 = open_file(full_path);

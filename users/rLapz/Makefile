@@ -4,10 +4,11 @@
 # Want to change the compiler?
 #   `make CC=clang`
 #
-CC := tcc
+CC := cc
 LD := $(CC)
-CFLAGS := -O2 -Wall -Wextra -fpie -fPIE -std=c99 -ggdb3 -fno-omit-frame-pointer
-LDFLAGS := -O2 -fpie -fPIE
+CFLAGS := -Os -Wall -Wextra -fpie -fPIE -std=c99 \
+	  -pedantic-errors -ggdb3 -fno-omit-frame-pointer
+LDFLAGS := -Os -fpie -fPIE
 OBJ := ftransfer.o server.o client.o util.o
 
 

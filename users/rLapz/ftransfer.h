@@ -12,7 +12,7 @@
 #include "config.h"
 
 
-typedef struct packet_t {
+typedef struct __attribute__((packed)) packet_t {
 	uint64_t file_size;
 	uint8_t  file_name_len;
 	char     file_name[255];
