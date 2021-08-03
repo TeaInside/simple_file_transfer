@@ -25,12 +25,12 @@
 #include "util.h"
 
 /* function declarations */
-static void  interupt_handler (int sig);
-static void  get_file_prop    (packet_t *pkt, char *argv[]);
-static FILE *open_file        (const char *file_name);
-static int   init_socket      (const char *addr, uint16_t port);
-static int   send_packet      (const int client_d, FILE *file, const packet_t *prop);
-int          run_client       (int argc, char *argv[]);
+static void  interrupt_handler	(int sig);
+static void  get_file_prop	(packet_t *pkt, char *argv[]);
+static FILE *open_file		(const char *file_name);
+static int   init_socket	(const char *addr, uint16_t port);
+static int   send_packet	(const int client_d, FILE *file, const packet_t *prop);
+int          run_client		(int argc, char *argv[]);
 
 /* global variable */
 static volatile int interrupted = 0;
@@ -38,7 +38,7 @@ static volatile int interrupted = 0;
 
 /* function implementations */
 static void
-interupt_handler(int sig)
+interrupt_handler(int sig)
 {
 	interrupted = 1;
 	(void)sig;
@@ -163,9 +163,9 @@ run_client(int argc, char *argv[])
 	int		 socket_d, s_packet;
 	const char	*full_path = argv[2];
 
-	signal(SIGINT,	interupt_handler);
-	signal(SIGTERM,	interupt_handler);
-	signal(SIGHUP,	interupt_handler);
+	signal(SIGINT,	interrupt_handler);
+	signal(SIGTERM,	interrupt_handler);
+	signal(SIGHUP,	interrupt_handler);
 	signal(SIGPIPE,	SIG_IGN		);
 
 	memset(&pkt, 0, sizeof(packet_t));
