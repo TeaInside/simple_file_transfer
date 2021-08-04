@@ -25,7 +25,6 @@
 /* function declarations */
 static void  interrupt_handler (int sig);
 static int   get_file_prop     (packet_t *pkt, char *argv[]);
-static FILE *open_file         (const char *file_name);
 static int   init_client       (const char *addr, const uint16_t port);
 static void  send_packet       (const int client_d, const packet_t *prop,
 		                     const char *file_name);
@@ -86,16 +85,6 @@ err:
 	return -errno;
 }
 
-static FILE *
-open_file(const char *file_name)
-{
-	FILE *f = fopen(file_name, "r");
-	if (f == NULL)
-		perror(file_name);
-
-	return f;
-}
-
 static int
 init_client(const char *addr, const uint16_t port)
 {
@@ -144,9 +133,9 @@ send_packet(const int client_d, const packet_t *prop, const char *file_name)
 		return;
 	}
 
-	file = open_file(file_name);
+	file = fopen(file_name, "r");
 	if (file == NULL) {
-		perror("open_file");
+		perror(file_name);
 		return;
 	}
 

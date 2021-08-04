@@ -21,7 +21,6 @@
 static void  interrupt_handler (int sig);
 static int   file_verif        (const char *filename);
 static int   init_server       (const char *addr, const uint16_t port);
-static FILE *open_file         (const char *file_name);
 static void  recv_packet       (int socket_d, packet_t *prop);
 int          run_server        (int argc, char *argv[]);
 
@@ -35,16 +34,6 @@ interrupt_handler(int sig)
 	interrupted  = 1;
 	errno        = EINTR;
 	(void)sig;
-}
-
-static FILE *
-open_file(const char *file_name)
-{
-	FILE *f = fopen(file_name, "w");
-	if (f == NULL)
-		perror(file_name);
-
-	return f;
 }
 
 static int
@@ -122,7 +111,7 @@ recv_packet(int socket_d, packet_t *prop)
 	}
 
 	/* get file properties from client */
-	puts("Receiving file properties...");
+	puts("Receiving file properties...\n");
 	recv_bytes = recv(client_d, prop, sizeof(packet_t), 0);
 	if (recv_bytes < 0) {
 		perror("recv");
@@ -138,19 +127,18 @@ recv_packet(int socket_d, packet_t *prop)
 	//file_size = be64toh(prop->file_size);
 	file_size = prop->file_size;
 
-	puts(WHITE_BOLD_E "File info" END_E);
-	printf("|-> File name   : %s (%u)\n",	prop->file_name,
-							prop->file_name_len);
-	printf("|-> File size   : %lu bytes\n", file_size);
-	printf("`-> From        : %s:%d\n", inet_ntoa(client.sin_addr), 
-							ntohs(client.sin_port));
+	printf(WHITE_BOLD_E "File info [%s:%d]" END_E "\n",
+			inet_ntoa(client.sin_addr), ntohs(client.sin_port));
+	printf("|-> File name   : %s (%u)\n",
+			prop->file_name, prop->file_name_len);
+	printf("`-> File size   : %lu bytes\n", file_size);
 
 	/* file handler */
 	char full_path[sizeof(DEST_DIR) + sizeof(prop->file_name) +2];
 	snprintf(full_path, sizeof(full_path), "%s/%s",
 			DEST_DIR, prop->file_name);
 
-	file = open_file(full_path);
+	file = fopen(full_path, "w");
 	if (file == NULL) {
 		perror("open_file");
 		goto cleanup1;
