@@ -12,8 +12,6 @@
 #include <string.h>
 #include <unistd.h>
 
-#include <arpa/inet.h>
-
 #include "ftransfer.h"
 
 /* function declarations */
@@ -142,6 +140,7 @@ recv_packet(int socket_d, packet_t *prop)
 		goto cleanup1;
 	}
 
+	puts("\nwriting...");
 	/* receive & write to disk */
 	while (total_bytes < prop->file_size) {
 		recv_bytes = recv(client_d, content, BUFFER_SIZE, 0);
@@ -164,14 +163,19 @@ recv_packet(int socket_d, packet_t *prop)
 
 		total_bytes += (uint64_t)writen_bytes;
 
-		print_progress("writing...", total_bytes, prop->file_size);
+		print_progress(total_bytes, prop->file_size);
 
 		if (interrupted == 1)
 			break;
 	}
 
+	printf("\n\rFlushing buffer...");
+	fflush(stdout);
+
 	fflush(file);
 	fclose(file);
+
+	puts(" - " WHITE_BOLD_E "Done!" END_E);
 
 cleanup1:
 	putchar('\n');
@@ -192,8 +196,11 @@ run_server(int argc, char *argv[])
 		return -errno;
 	}
 
-	int socket_d = 0;
+	printf(WHITE_BOLD_E "Server started [%s:%s]" END_E "\n", argv[0], argv[1]);
+	printf(WHITE_BOLD_E "Buffer size: %u" END_E"\n\n", BUFFER_SIZE);
+
 	packet_t pkt;
+	int	 socket_d = 0;
 
 	signal(SIGINT,	interrupt_handler);
 	signal(SIGTERM,	interrupt_handler);
@@ -201,9 +208,6 @@ run_server(int argc, char *argv[])
 	signal(SIGPIPE,	SIG_IGN		 );
 
 	memset(&pkt, 0, sizeof(packet_t));
-
-	printf(WHITE_BOLD_E "Server started [%s:%s]\n" END_E, argv[0], argv[1]);
-	printf(WHITE_BOLD_E "Buffer size: %u\n\n" END_E, BUFFER_SIZE);
 
 	if ((socket_d = init_server(argv[0], (uint16_t)atoi(argv[1]))) < 0)
 		goto err;

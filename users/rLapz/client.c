@@ -15,19 +15,18 @@
 #include <string.h>
 #include <unistd.h>
 
-#include <arpa/inet.h>
 #include <sys/stat.h>
 
 #include "ftransfer.h"
 
 /* function declarations */
-static void  interrupt_handler	(int sig);
-static int   get_file_prop	(packet_t *pkt, char *argv[]);
-static FILE *open_file		(const char *file_name);
-static int   init_client	(const char *addr, const uint16_t port);
-static int   send_packet	(const int client_d, const packet_t *prop,
-					const char *file_name);
-int          run_client		(int argc, char *argv[]);
+static void  interrupt_handler (int sig);
+static int   get_file_prop     (packet_t *pkt, char *argv[]);
+static FILE *open_file         (const char *file_name);
+static int   init_client       (const char *addr, const uint16_t port);
+static void  send_packet       (const int client_d, const packet_t *prop,
+		                     const char *file_name);
+int          run_client        (int argc, char *argv[]);
 
 /* global variables */
 static volatile int interrupted = 0;
@@ -124,7 +123,7 @@ err1:
 	return -errno;
 }
 
-static int
+static void
 send_packet(const int client_d, const packet_t *prop, const char *file_name)
 {
 	FILE	*file;
@@ -137,46 +136,41 @@ send_packet(const int client_d, const packet_t *prop, const char *file_name)
 	send_bytes = send(client_d, prop, sizeof(packet_t), 0);
 	if (send_bytes < 0) {
 		perror("send");
-		goto err1;
+		return;
 	}
 
 	file = open_file(file_name);
 	if (file == NULL) {
 		perror("open_file");
-		goto err1;
+		return;
 	}
 
+	puts("Sending...");
 	/* send the packet */
 	while (bytes_sent < (prop->file_size) && !feof(file)) {
 		read_bytes = fread(&content[0], 1, BUFFER_SIZE, file);
 		if (ferror(file)) {
 			perror("\nfread");
-			goto err0;
+			goto cleanup1;
 		}
 		
 		send_bytes = send(client_d, content, read_bytes, 0);
 		if (send_bytes < 0) {
 			perror("\nsend");
-			goto err0;
+			goto cleanup1;
 		}
 
 		bytes_sent += (uint64_t)send_bytes;
 
-		print_progress("Sending...", bytes_sent, prop->file_size);
+		print_progress(bytes_sent, prop->file_size);
 
 		if (interrupted == 1)
-			goto err0;
+			goto cleanup1;
 	}
 
-	return 0;
-
-err0:
+cleanup1:
 	fflush(file);
 	fclose(file);
-
-err1:
-	putchar('\n');
-	return -errno;
 }
 
 int
@@ -194,9 +188,11 @@ run_client(int argc, char *argv[])
 		return -errno;
 	}
 
-	packet_t    pkt;
-	int	    socket_d  = 0,
-		    packet_i  = 0;
+	printf(WHITE_BOLD_E "Client started" END_E "\n");
+	printf(WHITE_BOLD_E "Buffer size: %u" END_E "\n\n", BUFFER_SIZE);
+
+	packet_t pkt;
+	int	 socket_d  = 0;
 
 	signal(SIGINT,	interrupt_handler);
 	signal(SIGTERM,	interrupt_handler);
@@ -205,29 +201,24 @@ run_client(int argc, char *argv[])
 
 	memset(&pkt, 0, sizeof(packet_t));
 
-	printf(WHITE_BOLD_E "Client started\n" END_E);
-	printf(WHITE_BOLD_E "Buffer size: %u\n\n" END_E, BUFFER_SIZE);
-
 	if (get_file_prop(&pkt, argv) < 0)
 		goto err;
 
 	if ((socket_d = init_client(argv[0], (uint16_t)atoi(argv[1]))) < 0)
 		goto err;
 
-	if ((packet_i = send_packet(socket_d, &pkt, argv[2])) < 0)
-		goto cleanup;
+	send_packet(socket_d, &pkt, argv[2]);
 
-cleanup:
 	close(socket_d);
 
 	if (errno != 0)
 		goto err;
 
-	puts("uWu :3");
+	puts("\nuWu :3");
 	return 0;
 
 err:
-	fputs("Failed! :(\n", stderr);
+	fputs("\n\nFailed! :(\n", stderr);
 	return -errno;
 }
 

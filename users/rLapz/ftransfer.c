@@ -9,8 +9,6 @@
 #include <stdio.h>
 #include <string.h>
 
-#include <arpa/inet.h>
-
 #include "ftransfer.h"
 
 /* global variables */
@@ -29,13 +27,12 @@ print_help(FILE *f)
 }
 
 void
-print_progress(const char *label, uint64_t i, uint64_t total)
+print_progress(uint64_t i, uint64_t total)
 {
 
 	uint8_t per = (i * 100) / total;
 
-	printf("\r%s %lu bytes -> %lu bytes [%u%%]",
-			label, i, total, per);
+	printf("\r%lu bytes -> %lu bytes [%u%%]", i, total, per);
 
 	fflush(stdout);
 
