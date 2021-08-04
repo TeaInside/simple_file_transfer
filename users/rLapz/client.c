@@ -78,7 +78,6 @@ get_file_prop(packet_t *prop, char *argv[])
 	printf("|-> File size   : %lu bytes\n", prop->file_size);
 	printf("`-> Destination : %s:%s\n", argv[0], argv[1]);
 
-
 	return 0;
 
 err:
@@ -93,7 +92,7 @@ init_client(const char *addr, const uint16_t port)
 
 	socket_d = init_socket(&sock, addr, port);
 	if (socket_d < 0) {
-		perror("socket:");
+		perror("\nsocket:");
 		goto err1;
 	}
 
@@ -147,13 +146,13 @@ send_packet(const int socket_d, const packet_t *prop, const char *file_name)
 		read_bytes = fread(&content[0], 1, BUFFER_SIZE, file);
 		if (ferror(file)) {
 			perror("\nfread");
-			goto cleanup1;
+			break;
 		}
 		
 		send_bytes = send(socket_d, content, read_bytes, 0);
 		if (send_bytes < 0) {
 			perror("\nsend");
-			goto cleanup1;
+			break;
 		}
 
 		bytes_sent += (uint64_t)send_bytes;
@@ -161,12 +160,16 @@ send_packet(const int socket_d, const packet_t *prop, const char *file_name)
 		print_progress(bytes_sent, file_size);
 
 		if (interrupted == 1)
-			goto cleanup1;
+			break;
 	}
 
-cleanup1:
+	printf("\n\rFlushing buffer...");
+	fflush(stdout);
+
 	fflush(file);
 	fclose(file);
+
+	puts(" - " WHITE_BOLD_E "Done!" END_E);
 }
 
 int
@@ -195,33 +198,36 @@ run_client(int argc, char *argv[])
 
 	act.sa_handler = interrupt_handler;
 	if (sigaction(SIGINT, &act, NULL) < 0)
-		goto err;
+		goto err0;
 	if (sigaction(SIGTERM, &act, NULL) < 0)
-		goto err;
+		goto err0;
 	if (sigaction(SIGHUP, &act, NULL) < 0)
-		goto err;
+		goto err0;
 
 	act.sa_handler = SIG_IGN;
 	if (sigaction(SIGPIPE, &act, NULL) < 0)
-		goto err;
+		goto err0;
 
 	memset(&prop, 0, sizeof(packet_t));
 	if (get_file_prop(&prop, argv) < 0)
-		goto err;
+		goto err1;
 
 	if ((socket_d = init_client(argv[0], (uint16_t)atoi(argv[1]))) < 0)
-		goto err;
+		goto err1;
 
 	send_packet(socket_d, &prop, argv[2]);
 	close(socket_d);
 
 	if (errno != 0)
-		goto err;
+		goto err1;
 
 	puts("\nuWu :3");
 	return 0;
 
-err:
+err0:
+	perror(NULL);
+
+err1:
 	fputs("\nFailed! :(\n", stderr);
 	return -errno;
 }

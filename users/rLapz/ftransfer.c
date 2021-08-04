@@ -33,7 +33,6 @@ print_progress(uint64_t i, uint64_t total)
 	uint8_t per = (i * 100) / total;
 
 	printf("\r%lu bytes -> %lu bytes [%u%%]", i, total, per);
-
 	fflush(stdout);
 
 	if (per == 100)
@@ -45,7 +44,7 @@ init_socket(struct sockaddr_in *sock, const char *addr, const uint16_t port)
 {
 	int socket_d = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 	if (socket_d < 0)
-		goto err;
+		return -1;
 
 	memset(sock, 0, sizeof(struct sockaddr_in));
 
@@ -55,9 +54,6 @@ init_socket(struct sockaddr_in *sock, const char *addr, const uint16_t port)
 	sock->sin_port        = htons(port);
 
 	return socket_d;
-
-err:
-	return -1;
 }
 
 

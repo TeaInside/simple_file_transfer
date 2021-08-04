@@ -153,6 +153,7 @@ recv_packet(int socket_d, packet_t *prop)
 			perror("\nrecv");
 			break;
 		}
+
 		writen_bytes = fwrite(content, 1, (size_t)recv_bytes, file);
 		if (ferror(file)) {
 			perror("\nfwrite");
