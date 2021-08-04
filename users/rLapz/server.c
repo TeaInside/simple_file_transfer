@@ -3,6 +3,8 @@
  * Simple file transfer server
  *
  * Copyright (C) 2021  Arthur Lapz <rlapz@gnuweeb.org>
+ *
+ * NOTE: true = 1, false = 0
  */
 #ifndef _DEFAULT_SOURCE
 #define _DEFAULT_SOURCE
@@ -49,8 +51,8 @@ file_verif(const char *filename)
 static int
 init_server(const char *addr, const uint16_t port)
 {
-	int sock_opt = 1;
-	int socket_d;
+	int    sock_opt = 1;
+	int    socket_d;
 	struct sockaddr_in srv;
 
 	socket_d = init_socket(&srv, addr, port);
@@ -104,6 +106,7 @@ recv_packet(int socket_d, packet_t *prop)
 		return;
 	}
 
+	/* accept client connection */
 	client_d = accept(socket_d, (struct sockaddr *)&client, &client_len);
 	if (client_d < 0) {
 		perror("accept");
@@ -123,8 +126,6 @@ recv_packet(int socket_d, packet_t *prop)
 		goto cleanup1;
 	}
 
-	/* set file size */
-	//file_size = be64toh(prop->file_size);
 	file_size = prop->file_size;
 
 	printf(WHITE_BOLD_E "File info [%s:%d]" END_E "\n",
@@ -224,8 +225,10 @@ run_server(int argc, char *argv[])
 	if ((socket_d = init_server(argv[0], (uint16_t)atoi(argv[1]))) < 0)
 		goto err;
 
+	/* main loop */
 	while (interrupted == 0)
 		recv_packet(socket_d, &pkt);
+	/* end main loop */
 
 	close(socket_d);
 
