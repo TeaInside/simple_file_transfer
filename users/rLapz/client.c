@@ -6,8 +6,12 @@
  *
  * NOTE: true = 1, false = 0
  */
+#ifndef _DEFAULT_SOURCE
+#define _DEFAULT_SOURCE
+#endif
 
 #include <errno.h>
+#include <endian.h>
 #include <libgen.h>
 #include <signal.h>
 #include <stdio.h>
@@ -64,7 +68,7 @@ get_file_prop(packet_t *pkt, char *argv[])
 	base_name = basename(full_path);
 	f_len	  = strlen(base_name);
 
-	pkt->file_size     = (uint64_t)s.st_size;
+	uint64_t file_size = (uint64_t)s.st_size;
 	pkt->file_name_len = (uint8_t)f_len;
 
 	memcpy(pkt->file_name, base_name, (size_t)pkt->file_name_len);
@@ -73,8 +77,10 @@ get_file_prop(packet_t *pkt, char *argv[])
 	puts(WHITE_BOLD_E "File info" END_E);
 	printf("|-> Full path   : %s (%zu)\n",	full_path, strlen(full_path));
 	printf("|-> File name   : %s (%u)\n",	pkt->file_name,	pkt->file_name_len);
-	printf("|-> File size   : %lu bytes\n", pkt->file_size);
+	printf("|-> File size   : %lu bytes\n", file_size);
 	printf("`-> Destination : %s:%s\n",	argv[0], argv[1]);
+
+	pkt->file_size = htobe64(file_size);
 
 	return 0;
 
@@ -129,6 +135,7 @@ send_packet(const int client_d, const packet_t *prop, const char *file_name)
 	FILE	*file;
 	ssize_t  send_bytes;
 	size_t	 read_bytes;
+	uint64_t file_size;
 	uint64_t bytes_sent = 0;
 	char	 content[BUFFER_SIZE];
 
@@ -145,9 +152,11 @@ send_packet(const int client_d, const packet_t *prop, const char *file_name)
 		return;
 	}
 
+	file_size = be64toh(prop->file_size);
+
 	puts("Sending...");
 	/* send the packet */
-	while (bytes_sent < (prop->file_size) && !feof(file)) {
+	while (bytes_sent < file_size && !feof(file)) {
 		read_bytes = fread(&content[0], 1, BUFFER_SIZE, file);
 		if (ferror(file)) {
 			perror("\nfread");
@@ -162,7 +171,7 @@ send_packet(const int client_d, const packet_t *prop, const char *file_name)
 
 		bytes_sent += (uint64_t)send_bytes;
 
-		print_progress(bytes_sent, prop->file_size);
+		print_progress(bytes_sent, file_size);
 
 		if (interrupted == 1)
 			goto cleanup1;
@@ -193,11 +202,23 @@ run_client(int argc, char *argv[])
 
 	packet_t pkt;
 	int	 socket_d  = 0;
+	struct   sigaction new_act,
+			   old_act;
 
-	signal(SIGINT,	interrupt_handler);
-	signal(SIGTERM,	interrupt_handler);
-	signal(SIGHUP,	interrupt_handler);
-	signal(SIGPIPE,	SIG_IGN		 );
+	new_act.sa_handler = interrupt_handler;
+	sigemptyset(&new_act.sa_mask);
+	new_act.sa_flags = 0;
+
+	sigaction(SIGINT, NULL, &old_act);
+	if (old_act.sa_handler != SIG_IGN)
+		sigaction(SIGINT, &new_act, NULL);
+	sigaction(SIGHUP, NULL, &old_act);
+	if (old_act.sa_handler != SIG_IGN)
+		sigaction(SIGHUP, &new_act, NULL);
+	sigaction(SIGTERM, NULL, &old_act);
+	if (old_act.sa_handler != SIG_IGN)
+		sigaction(SIGTERM, &new_act, NULL);
+
 
 	memset(&pkt, 0, sizeof(packet_t));
 
@@ -218,7 +239,7 @@ run_client(int argc, char *argv[])
 	return 0;
 
 err:
-	fputs("\n\nFailed! :(\n", stderr);
+	fputs("\nFailed! :(\n", stderr);
 	return -errno;
 }
 

@@ -4,6 +4,9 @@
  *
  * Copyright (C) 2021  Arthur Lapz <rlapz@gnuweeb.org>
  */
+#ifndef _DEFAULT_SOURCE
+#define _DEFAULT_SOURCE
+#endif
 
 #include <errno.h>
 #include <signal.h>
@@ -98,6 +101,7 @@ recv_packet(int socket_d, packet_t *prop)
 	size_t    writen_bytes;
 	struct    sockaddr_in client;
 	char      content[BUFFER_SIZE];
+	uint64_t  file_size;
 	uint64_t  total_bytes	= 0;
 	socklen_t client_len	= sizeof(struct sockaddr_in);
 	
@@ -125,9 +129,12 @@ recv_packet(int socket_d, packet_t *prop)
 		goto cleanup1;
 	}
 
+	/* set file size */
+	file_size = be64toh(prop->file_size);
+
 	puts(WHITE_BOLD_E "File info" END_E);
 	printf("|-> File name   : %s (%u)\n",	prop->file_name, prop->file_name_len);
-	printf("`-> File size   : %lu bytes\n", prop->file_size);
+	printf("`-> File size   : %lu bytes\n", file_size);
 
 	/* file handler */
 	char full_path[sizeof(DEST_DIR) + sizeof(prop->file_name) +2];
@@ -142,7 +149,7 @@ recv_packet(int socket_d, packet_t *prop)
 
 	puts("\nwriting...");
 	/* receive & write to disk */
-	while (total_bytes < prop->file_size) {
+	while (total_bytes < file_size) {
 		recv_bytes = recv(client_d, content, BUFFER_SIZE, 0);
 		if (recv_bytes < 0) {
 			perror("\nrecv");
@@ -163,7 +170,7 @@ recv_packet(int socket_d, packet_t *prop)
 
 		total_bytes += (uint64_t)writen_bytes;
 
-		print_progress(total_bytes, prop->file_size);
+		print_progress(total_bytes, file_size);
 
 		if (interrupted == 1)
 			break;
@@ -201,11 +208,22 @@ run_server(int argc, char *argv[])
 
 	packet_t pkt;
 	int	 socket_d = 0;
+	struct   sigaction new_act,
+			   old_act;
 
-	signal(SIGINT,	interrupt_handler);
-	signal(SIGTERM,	interrupt_handler);
-	signal(SIGHUP,	interrupt_handler);
-	signal(SIGPIPE,	SIG_IGN		 );
+	new_act.sa_handler = interrupt_handler;
+	sigemptyset(&new_act.sa_mask);
+	new_act.sa_flags = 0;
+
+	sigaction(SIGINT, NULL, &old_act);
+	if (old_act.sa_handler != SIG_IGN)
+		sigaction(SIGINT, &new_act, NULL);
+	sigaction(SIGHUP, NULL, &old_act);
+	if (old_act.sa_handler != SIG_IGN)
+		sigaction(SIGHUP, &new_act, NULL);
+	sigaction(SIGTERM, NULL, &old_act);
+	if (old_act.sa_handler != SIG_IGN)
+		sigaction(SIGTERM, &new_act, NULL);
 
 	memset(&pkt, 0, sizeof(packet_t));
 
