@@ -64,7 +64,7 @@ get_file_prop(packet_t *prop, char *argv[])
 	base_name = basename(full_path);
 	bn_len	  = strlen(base_name);
 
-	memset(&prop, 0, sizeof(packet_t));
+	memset(prop, 0, sizeof(packet_t));
 
 	prop->file_size     = (uint64_t)s.st_size;
 	prop->file_name_len = (uint8_t)bn_len;
