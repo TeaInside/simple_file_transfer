@@ -130,7 +130,7 @@ recv_packet(int socket_d, packet_t *prop)
 	printf("`-> File size   : %lu bytes\n", prop->file_size);
 
 	/* file handler */
-	char full_path[sizeof(DEST_DIR)+255];
+	char full_path[sizeof(DEST_DIR) + sizeof(prop->file_name) +2];
 	snprintf(full_path, sizeof(full_path), "%s/%s",
 			DEST_DIR, prop->file_name);
 
@@ -155,7 +155,7 @@ recv_packet(int socket_d, packet_t *prop)
 			break;
 		}
 
-		writen_bytes = fwrite(content, 1, recv_bytes, file);
+		writen_bytes = fwrite(content, 1, (size_t)recv_bytes, file);
 		if (ferror(file)) {
 			perror("\nfwrite");
 			break;
