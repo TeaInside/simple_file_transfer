@@ -6,6 +6,9 @@
  *
  * NOTE: true = 1, false = 0
  */
+#ifndef _DEFAULT_SOURCE
+#define _DEFAULT_SOURCE
+#endif
 
 #include <errno.h>
 #include <libgen.h>
@@ -21,10 +24,9 @@
 
 /* function declarations */
 static void  interrupt_handler (int sig);
-static int   get_file_prop     (packet_t *pkt, char *argv[]);
-static FILE *open_file         (const char *file_name);
+static int   get_file_prop     (packet_t *prop, char *argv[]);
 static int   init_client       (const char *addr, const uint16_t port);
-static void  send_packet       (const int client_d, const packet_t *prop,
+static void  send_packet       (const int socket_d, const packet_t *prop,
 		                     const char *file_name);
 int          run_client        (int argc, char *argv[]);
 
@@ -42,12 +44,12 @@ interrupt_handler(int sig)
 }
 
 static int
-get_file_prop(packet_t *pkt, char *argv[])
+get_file_prop(packet_t *prop, char *argv[])
 {
 	const char *base_name;
 	char       *full_path;
 	struct      stat s;
-	size_t      f_len;
+	size_t      bn_len;
 
 	if (stat(argv[2], &s) < 0) {
 		perror(argv[2]);
@@ -62,34 +64,24 @@ get_file_prop(packet_t *pkt, char *argv[])
 
 	full_path = argv[2];
 	base_name = basename(full_path);
-	f_len	  = strlen(base_name);
+	bn_len	  = strlen(base_name);
 
-	pkt->file_size     = (uint64_t)s.st_size;
-	pkt->file_name_len = (uint8_t)f_len;
+	prop->file_size     = (uint64_t)s.st_size;
+	prop->file_name_len = (uint8_t)bn_len;
 
-	memcpy(pkt->file_name, base_name, (size_t)pkt->file_name_len);
-	pkt->file_name[pkt->file_name_len] = '\0';
+	memcpy(prop->file_name, base_name, (size_t)prop->file_name_len);
+	prop->file_name[prop->file_name_len] = '\0';
 
 	puts(WHITE_BOLD_E "File info" END_E);
-	printf("|-> Full path   : %s (%zu)\n",	full_path, strlen(full_path));
-	printf("|-> File name   : %s (%u)\n",	pkt->file_name,	pkt->file_name_len);
-	printf("|-> File size   : %lu bytes\n", pkt->file_size);
-	printf("`-> Destination : %s:%s\n",	argv[0], argv[1]);
+	printf("|-> Full path   : %s (%zu)\n", full_path, strlen(full_path));
+	printf("|-> File name   : %s (%u)\n", prop->file_name, prop->file_name_len);
+	printf("|-> File size   : %lu bytes\n", prop->file_size);
+	printf("`-> Destination : %s:%s\n", argv[0], argv[1]);
 
 	return 0;
 
 err:
 	return -errno;
-}
-
-static FILE *
-open_file(const char *file_name)
-{
-	FILE *f = fopen(file_name, "r");
-	if (f == NULL)
-		perror(file_name);
-
-	return f;
 }
 
 static int
@@ -100,7 +92,7 @@ init_client(const char *addr, const uint16_t port)
 
 	socket_d = init_socket(&sock, addr, port);
 	if (socket_d < 0) {
-		perror("socket:");
+		perror("\nsocket:");
 		goto err1;
 	}
 
@@ -124,53 +116,60 @@ err1:
 }
 
 static void
-send_packet(const int client_d, const packet_t *prop, const char *file_name)
+send_packet(const int socket_d, const packet_t *prop, const char *file_name)
 {
 	FILE	*file;
 	ssize_t  send_bytes;
 	size_t	 read_bytes;
+	uint64_t file_size;
 	uint64_t bytes_sent = 0;
 	char	 content[BUFFER_SIZE];
 
 	/* send file properties */
-	send_bytes = send(client_d, prop, sizeof(packet_t), 0);
+	send_bytes = send(socket_d, prop, sizeof(packet_t), 0);
 	if (send_bytes < 0) {
 		perror("send");
 		return;
 	}
 
-	file = open_file(file_name);
+	file = fopen(file_name, "r");
 	if (file == NULL) {
-		perror("open_file");
+		perror(file_name);
 		return;
 	}
 
+	file_size = prop->file_size;
+
 	puts("Sending...");
 	/* send the packet */
-	while (bytes_sent < (prop->file_size) && !feof(file)) {
+	while (bytes_sent < file_size && !feof(file)) {
 		read_bytes = fread(&content[0], 1, BUFFER_SIZE, file);
 		if (ferror(file)) {
 			perror("\nfread");
-			goto cleanup1;
+			break;
 		}
 		
-		send_bytes = send(client_d, content, read_bytes, 0);
+		send_bytes = send(socket_d, content, read_bytes, 0);
 		if (send_bytes < 0) {
 			perror("\nsend");
-			goto cleanup1;
+			break;
 		}
 
 		bytes_sent += (uint64_t)send_bytes;
 
-		print_progress(bytes_sent, prop->file_size);
+		print_progress(bytes_sent, file_size);
 
 		if (interrupted == 1)
-			goto cleanup1;
+			break;
 	}
 
-cleanup1:
+	printf("\n\rFlushing buffer...");
+	fflush(stdout);
+
 	fflush(file);
 	fclose(file);
+
+	puts(" - " WHITE_BOLD_E "Done!" END_E);
 }
 
 int
@@ -191,34 +190,45 @@ run_client(int argc, char *argv[])
 	printf(WHITE_BOLD_E "Client started" END_E "\n");
 	printf(WHITE_BOLD_E "Buffer size: %u" END_E "\n\n", BUFFER_SIZE);
 
-	packet_t pkt;
 	int	 socket_d  = 0;
+	struct   sigaction act;
+	packet_t prop;
 
-	signal(SIGINT,	interrupt_handler);
-	signal(SIGTERM,	interrupt_handler);
-	signal(SIGHUP,	interrupt_handler);
-	signal(SIGPIPE,	SIG_IGN		 );
+	memset(&act, 0, sizeof(struct sigaction));
 
-	memset(&pkt, 0, sizeof(packet_t));
+	act.sa_handler = interrupt_handler;
+	if (sigaction(SIGINT, &act, NULL) < 0)
+		goto err0;
+	if (sigaction(SIGTERM, &act, NULL) < 0)
+		goto err0;
+	if (sigaction(SIGHUP, &act, NULL) < 0)
+		goto err0;
 
-	if (get_file_prop(&pkt, argv) < 0)
-		goto err;
+	act.sa_handler = SIG_IGN;
+	if (sigaction(SIGPIPE, &act, NULL) < 0)
+		goto err0;
+
+	memset(&prop, 0, sizeof(packet_t));
+	if (get_file_prop(&prop, argv) < 0)
+		goto err1;
 
 	if ((socket_d = init_client(argv[0], (uint16_t)atoi(argv[1]))) < 0)
-		goto err;
+		goto err1;
 
-	send_packet(socket_d, &pkt, argv[2]);
-
+	send_packet(socket_d, &prop, argv[2]);
 	close(socket_d);
 
 	if (errno != 0)
-		goto err;
+		goto err1;
 
 	puts("\nuWu :3");
 	return 0;
 
-err:
-	fputs("\n\nFailed! :(\n", stderr);
+err0:
+	perror(NULL);
+
+err1:
+	fputs("\nFailed! :(\n", stderr);
 	return -errno;
 }
 

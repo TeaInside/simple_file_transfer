@@ -3,7 +3,12 @@
  * Simple file transfer server
  *
  * Copyright (C) 2021  Arthur Lapz <rlapz@gnuweeb.org>
+ *
+ * NOTE: true = 1, false = 0
  */
+#ifndef _DEFAULT_SOURCE
+#define _DEFAULT_SOURCE
+#endif
 
 #include <errno.h>
 #include <signal.h>
@@ -18,7 +23,6 @@
 static void  interrupt_handler (int sig);
 static int   file_verif        (const char *filename);
 static int   init_server       (const char *addr, const uint16_t port);
-static FILE *open_file         (const char *file_name);
 static void  recv_packet       (int socket_d, packet_t *prop);
 int          run_server        (int argc, char *argv[]);
 
@@ -34,16 +38,6 @@ interrupt_handler(int sig)
 	(void)sig;
 }
 
-static FILE *
-open_file(const char *file_name)
-{
-	FILE *f = fopen(file_name, "w");
-	if (f == NULL)
-		perror(file_name);
-
-	return f;
-}
-
 static int
 file_verif(const char *filename)
 {
@@ -57,8 +51,8 @@ file_verif(const char *filename)
 static int
 init_server(const char *addr, const uint16_t port)
 {
-	int sock_opt = 1;
-	int socket_d;
+	int    sock_opt = 1;
+	int    socket_d;
 	struct sockaddr_in srv;
 
 	socket_d = init_socket(&srv, addr, port);
@@ -98,6 +92,7 @@ recv_packet(int socket_d, packet_t *prop)
 	size_t    writen_bytes;
 	struct    sockaddr_in client;
 	char      content[BUFFER_SIZE];
+	uint64_t  file_size;
 	uint64_t  total_bytes	= 0;
 	socklen_t client_len	= sizeof(struct sockaddr_in);
 	
@@ -106,6 +101,12 @@ recv_packet(int socket_d, packet_t *prop)
 		return;
 	}
 
+	if (getsockname(socket_d, (struct sockaddr *)&client, &client_len) < 0) {
+		perror("getsockname");
+		return;
+	}
+
+	/* accept client connection */
 	client_d = accept(socket_d, (struct sockaddr *)&client, &client_len);
 	if (client_d < 0) {
 		perror("accept");
@@ -113,7 +114,7 @@ recv_packet(int socket_d, packet_t *prop)
 	}
 
 	/* get file properties from client */
-	puts("Receiving file properties...");
+	puts("Receiving file properties...\n");
 	recv_bytes = recv(client_d, prop, sizeof(packet_t), 0);
 	if (recv_bytes < 0) {
 		perror("recv");
@@ -125,16 +126,20 @@ recv_packet(int socket_d, packet_t *prop)
 		goto cleanup1;
 	}
 
-	puts(WHITE_BOLD_E "File info" END_E);
-	printf("|-> File name   : %s (%u)\n",	prop->file_name, prop->file_name_len);
-	printf("`-> File size   : %lu bytes\n", prop->file_size);
+	file_size = prop->file_size;
+
+	printf(WHITE_BOLD_E "File info [%s:%d]" END_E "\n",
+			inet_ntoa(client.sin_addr), ntohs(client.sin_port));
+	printf("|-> File name   : %s (%u)\n",
+			prop->file_name, prop->file_name_len);
+	printf("`-> File size   : %lu bytes\n", file_size);
 
 	/* file handler */
 	char full_path[sizeof(DEST_DIR) + sizeof(prop->file_name) +2];
 	snprintf(full_path, sizeof(full_path), "%s/%s",
 			DEST_DIR, prop->file_name);
 
-	file = open_file(full_path);
+	file = fopen(full_path, "w");
 	if (file == NULL) {
 		perror("open_file");
 		goto cleanup1;
@@ -142,15 +147,9 @@ recv_packet(int socket_d, packet_t *prop)
 
 	puts("\nwriting...");
 	/* receive & write to disk */
-	while (total_bytes < prop->file_size) {
+	while (total_bytes < file_size) {
 		recv_bytes = recv(client_d, content, BUFFER_SIZE, 0);
 		if (recv_bytes < 0) {
-			perror("\nrecv");
-			break;
-		}
-
-		if (recv_bytes == 0) {
-			errno = ECANCELED;
 			perror("\nrecv");
 			break;
 		}
@@ -163,7 +162,13 @@ recv_packet(int socket_d, packet_t *prop)
 
 		total_bytes += (uint64_t)writen_bytes;
 
-		print_progress(total_bytes, prop->file_size);
+		print_progress(total_bytes, file_size);
+
+		if (recv_bytes == 0) {
+			errno = ECANCELED;
+			perror("\nrecv");
+			break;
+		}
 
 		if (interrupted == 1)
 			break;
@@ -199,21 +204,32 @@ run_server(int argc, char *argv[])
 	printf(WHITE_BOLD_E "Server started [%s:%s]" END_E "\n", argv[0], argv[1]);
 	printf(WHITE_BOLD_E "Buffer size: %u" END_E"\n\n", BUFFER_SIZE);
 
-	packet_t pkt;
 	int	 socket_d = 0;
+	struct   sigaction act;
+	packet_t pkt;
 
-	signal(SIGINT,	interrupt_handler);
-	signal(SIGTERM,	interrupt_handler);
-	signal(SIGHUP,	interrupt_handler);
-	signal(SIGPIPE,	SIG_IGN		 );
+	memset(&act, 0, sizeof(struct sigaction));
+
+	act.sa_handler= interrupt_handler;
+	if (sigaction(SIGINT, &act, NULL) < 0)
+		goto err;
+	if (sigaction(SIGTERM, &act, NULL) < 0)
+		goto err;
+	if (sigaction(SIGHUP, &act, NULL) < 0)
+		goto err;
+
+	act.sa_handler = SIG_IGN;
+	if (sigaction(SIGPIPE, &act, NULL) < 0)
+		goto err;
 
 	memset(&pkt, 0, sizeof(packet_t));
-
 	if ((socket_d = init_server(argv[0], (uint16_t)atoi(argv[1]))) < 0)
 		goto err;
 
+	/* main loop */
 	while (interrupted == 0)
 		recv_packet(socket_d, &pkt);
+	/* end main loop */
 
 	close(socket_d);
 
