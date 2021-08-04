@@ -110,6 +110,11 @@ recv_packet(int socket_d, packet_t *prop)
 		return;
 	}
 
+	if (getsockname(socket_d, (struct sockaddr *)&client, &client_len) < 0) {
+		perror("getsockname");
+		return;
+	}
+
 	client_d = accept(socket_d, (struct sockaddr *)&client, &client_len);
 	if (client_d < 0) {
 		perror("accept");
@@ -130,11 +135,15 @@ recv_packet(int socket_d, packet_t *prop)
 	}
 
 	/* set file size */
-	file_size = be64toh(prop->file_size);
+	//file_size = be64toh(prop->file_size);
+	file_size = prop->file_size;
 
 	puts(WHITE_BOLD_E "File info" END_E);
-	printf("|-> File name   : %s (%u)\n",	prop->file_name, prop->file_name_len);
-	printf("`-> File size   : %lu bytes\n", file_size);
+	printf("|-> File name   : %s (%u)\n",	prop->file_name,
+							prop->file_name_len);
+	printf("|-> File size   : %lu bytes\n", file_size);
+	printf("`-> From        : %s:%d\n", inet_ntoa(client.sin_addr), 
+							ntohs(client.sin_port));
 
 	/* file handler */
 	char full_path[sizeof(DEST_DIR) + sizeof(prop->file_name) +2];
@@ -155,13 +164,6 @@ recv_packet(int socket_d, packet_t *prop)
 			perror("\nrecv");
 			break;
 		}
-
-		if (recv_bytes == 0) {
-			errno = ECANCELED;
-			perror("\nrecv");
-			break;
-		}
-
 		writen_bytes = fwrite(content, 1, (size_t)recv_bytes, file);
 		if (ferror(file)) {
 			perror("\nfwrite");
@@ -171,6 +173,12 @@ recv_packet(int socket_d, packet_t *prop)
 		total_bytes += (uint64_t)writen_bytes;
 
 		print_progress(total_bytes, file_size);
+
+		if (recv_bytes == 0) {
+			errno = ECANCELED;
+			perror("\nrecv");
+			break;
+		}
 
 		if (interrupted == 1)
 			break;
@@ -206,27 +214,25 @@ run_server(int argc, char *argv[])
 	printf(WHITE_BOLD_E "Server started [%s:%s]" END_E "\n", argv[0], argv[1]);
 	printf(WHITE_BOLD_E "Buffer size: %u" END_E"\n\n", BUFFER_SIZE);
 
-	packet_t pkt;
 	int	 socket_d = 0;
-	struct   sigaction new_act,
-			   old_act;
+	struct   sigaction act;
+	packet_t pkt;
 
-	new_act.sa_handler = interrupt_handler;
-	sigemptyset(&new_act.sa_mask);
-	new_act.sa_flags = 0;
+	memset(&act, 0, sizeof(struct sigaction));
 
-	sigaction(SIGINT, NULL, &old_act);
-	if (old_act.sa_handler != SIG_IGN)
-		sigaction(SIGINT, &new_act, NULL);
-	sigaction(SIGHUP, NULL, &old_act);
-	if (old_act.sa_handler != SIG_IGN)
-		sigaction(SIGHUP, &new_act, NULL);
-	sigaction(SIGTERM, NULL, &old_act);
-	if (old_act.sa_handler != SIG_IGN)
-		sigaction(SIGTERM, &new_act, NULL);
+	act.sa_handler= interrupt_handler;
+	if (sigaction(SIGINT, &act, NULL) < 0)
+		goto err;
+	if (sigaction(SIGTERM, &act, NULL) < 0)
+		goto err;
+	if (sigaction(SIGHUP, &act, NULL) < 0)
+		goto err;
+
+	act.sa_handler = SIG_IGN;
+	if (sigaction(SIGPIPE, &act, NULL) < 0)
+		goto err;
 
 	memset(&pkt, 0, sizeof(packet_t));
-
 	if ((socket_d = init_server(argv[0], (uint16_t)atoi(argv[1]))) < 0)
 		goto err;
 

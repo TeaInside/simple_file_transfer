@@ -11,7 +11,6 @@
 #endif
 
 #include <errno.h>
-#include <endian.h>
 #include <libgen.h>
 #include <signal.h>
 #include <stdio.h>
@@ -68,7 +67,7 @@ get_file_prop(packet_t *pkt, char *argv[])
 	base_name = basename(full_path);
 	f_len	  = strlen(base_name);
 
-	uint64_t file_size = (uint64_t)s.st_size;
+	pkt->file_size = (uint64_t)s.st_size;
 	pkt->file_name_len = (uint8_t)f_len;
 
 	memcpy(pkt->file_name, base_name, (size_t)pkt->file_name_len);
@@ -77,10 +76,9 @@ get_file_prop(packet_t *pkt, char *argv[])
 	puts(WHITE_BOLD_E "File info" END_E);
 	printf("|-> Full path   : %s (%zu)\n",	full_path, strlen(full_path));
 	printf("|-> File name   : %s (%u)\n",	pkt->file_name,	pkt->file_name_len);
-	printf("|-> File size   : %lu bytes\n", file_size);
+	printf("|-> File size   : %lu bytes\n", pkt->file_size);
 	printf("`-> Destination : %s:%s\n",	argv[0], argv[1]);
 
-	pkt->file_size = htobe64(file_size);
 
 	return 0;
 
@@ -152,7 +150,7 @@ send_packet(const int client_d, const packet_t *prop, const char *file_name)
 		return;
 	}
 
-	file_size = be64toh(prop->file_size);
+	file_size = prop->file_size;
 
 	puts("Sending...");
 	/* send the packet */
@@ -200,28 +198,25 @@ run_client(int argc, char *argv[])
 	printf(WHITE_BOLD_E "Client started" END_E "\n");
 	printf(WHITE_BOLD_E "Buffer size: %u" END_E "\n\n", BUFFER_SIZE);
 
-	packet_t pkt;
 	int	 socket_d  = 0;
-	struct   sigaction new_act,
-			   old_act;
+	struct   sigaction act;
+	packet_t pkt;
 
-	new_act.sa_handler = interrupt_handler;
-	sigemptyset(&new_act.sa_mask);
-	new_act.sa_flags = 0;
+	memset(&act, 0, sizeof(struct sigaction));
 
-	sigaction(SIGINT, NULL, &old_act);
-	if (old_act.sa_handler != SIG_IGN)
-		sigaction(SIGINT, &new_act, NULL);
-	sigaction(SIGHUP, NULL, &old_act);
-	if (old_act.sa_handler != SIG_IGN)
-		sigaction(SIGHUP, &new_act, NULL);
-	sigaction(SIGTERM, NULL, &old_act);
-	if (old_act.sa_handler != SIG_IGN)
-		sigaction(SIGTERM, &new_act, NULL);
+	act.sa_handler = interrupt_handler;
+	if (sigaction(SIGINT, &act, NULL) < 0)
+		goto err;
+	if (sigaction(SIGTERM, &act, NULL) < 0)
+		goto err;
+	if (sigaction(SIGHUP, &act, NULL) < 0)
+		goto err;
 
+	act.sa_handler = SIG_IGN;
+	if (sigaction(SIGPIPE, &act, NULL) < 0)
+		goto err;
 
 	memset(&pkt, 0, sizeof(packet_t));
-
 	if (get_file_prop(&pkt, argv) < 0)
 		goto err;
 
@@ -229,7 +224,6 @@ run_client(int argc, char *argv[])
 		goto err;
 
 	send_packet(socket_d, &pkt, argv[2]);
-
 	close(socket_d);
 
 	if (errno != 0)
