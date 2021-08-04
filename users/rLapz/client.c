@@ -6,9 +6,7 @@
  *
  * NOTE: true = 1, false = 0
  */
-#ifndef _DEFAULT_SOURCE
-#define _DEFAULT_SOURCE
-#endif
+#define _XOPEN_SOURCE 700
 
 #include <errno.h>
 #include <libgen.h>
@@ -65,6 +63,8 @@ get_file_prop(packet_t *prop, char *argv[])
 	full_path = argv[2];
 	base_name = basename(full_path);
 	bn_len	  = strlen(base_name);
+
+	memset(&prop, 0, sizeof(packet_t));
 
 	prop->file_size     = (uint64_t)s.st_size;
 	prop->file_name_len = (uint8_t)bn_len;
@@ -126,7 +126,7 @@ send_packet(const int socket_d, const packet_t *prop, const char *file_name)
 	char	 content[BUFFER_SIZE];
 
 	/* send file properties */
-	send_bytes = send(socket_d, prop, sizeof(packet_t), 0);
+	send_bytes = send(socket_d, (packet_t *)prop, sizeof(packet_t), 0);
 	if (send_bytes < 0) {
 		perror("send");
 		return;
@@ -143,13 +143,13 @@ send_packet(const int socket_d, const packet_t *prop, const char *file_name)
 	puts("Sending...");
 	/* send the packet */
 	while (bytes_sent < file_size && !feof(file)) {
-		read_bytes = fread(&content[0], 1, BUFFER_SIZE, file);
+		read_bytes = fread((char *)&content[0], 1, BUFFER_SIZE, file);
 		if (ferror(file)) {
 			perror("\nfread");
 			break;
 		}
 		
-		send_bytes = send(socket_d, content, read_bytes, 0);
+		send_bytes = send(socket_d, (char *)content, read_bytes, 0);
 		if (send_bytes < 0) {
 			perror("\nsend");
 			break;
@@ -208,7 +208,6 @@ run_client(int argc, char *argv[])
 	if (sigaction(SIGPIPE, &act, NULL) < 0)
 		goto err0;
 
-	memset(&prop, 0, sizeof(packet_t));
 	if (get_file_prop(&prop, argv) < 0)
 		goto err1;
 
