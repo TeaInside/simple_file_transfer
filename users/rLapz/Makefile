@@ -6,7 +6,7 @@
 #
 CC := tcc
 LD := $(CC)
-CFLAGS := -O3 -Wall -Wextra -fpie -fPIE -std=c11 \
+CFLAGS := -std=c99 -O3 -Wall -Wextra -fpie -fPIE \
 	  -ggdb3 -fno-omit-frame-pointer
 
 LDFLAGS := -O3 -fpie -fPIE
