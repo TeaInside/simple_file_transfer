@@ -53,7 +53,7 @@ init_server(const char *addr, const uint16_t port)
 	int    socket_d;
 	struct sockaddr_in srv;
 
-	socket_d = init_socket(&srv, addr, port);
+	socket_d = init_socket(&srv, addr, port); /* see: ftransfer.h */
 	if (socket_d < 0) {
 		perror("socket");
 		goto err1;
@@ -147,7 +147,7 @@ recv_packet(const int socket_d)
 
 	puts("\nwriting...");
 	/* receive & write to disk */
-	while (total_bytes < file_size) {
+	while (total_bytes < file_size && interrupted == 0) {
 		recv_bytes = recv(client_d, (char *)content, BUFFER_SIZE, 0);
 		if (recv_bytes < 0) {
 			perror("\nrecv");
@@ -162,16 +162,11 @@ recv_packet(const int socket_d)
 
 		total_bytes += (uint64_t)writen_bytes;
 
-		print_progress(total_bytes, file_size);
-
 		if (recv_bytes == 0) {
 			errno = ECANCELED;
 			perror("\nrecv");
 			break;
 		}
-
-		if (interrupted == 1)
-			break;
 	}
 
 	printf("\n\rFlushing buffer...");

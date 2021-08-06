@@ -90,7 +90,7 @@ init_client(const char *addr, const uint16_t port)
 	int socket_d;
 	struct sockaddr_in sock;
 
-	socket_d = init_socket(&sock, addr, port);
+	socket_d = init_socket(&sock, addr, port); /* see: ftransfer.h */
 	if (socket_d < 0) {
 		perror("\nsocket:");
 		goto err1;
@@ -142,25 +142,20 @@ send_packet(const int socket_d, const packet_t *prop, const char *file_name)
 
 	puts("Sending...");
 	/* send the packet */
-	while (bytes_sent < file_size && !feof(file)) {
+	while (bytes_sent < file_size && !feof(file) && interrupted == 0) {
 		read_bytes = fread((char *)&content[0], 1, BUFFER_SIZE, file);
 		if (ferror(file)) {
 			perror("\nfread");
 			break;
 		}
 		
-		send_bytes = send(socket_d, (char *)content, read_bytes, 0);
+		send_bytes = send(socket_d, (char *)&content[0], read_bytes, 0);
 		if (send_bytes < 0) {
 			perror("\nsend");
 			break;
 		}
 
 		bytes_sent += (uint64_t)send_bytes;
-
-		print_progress(bytes_sent, file_size);
-
-		if (interrupted == 1)
-			break;
 	}
 
 	printf("\n\rFlushing buffer...");
