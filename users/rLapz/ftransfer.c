@@ -26,19 +26,6 @@ print_help(FILE *f)
 	fprintf(f, "  %s client [server_addr] [server_port] [filename]\n", app);
 }
 
-void
-print_progress(uint64_t i, uint64_t total)
-{
-
-	uint8_t per = (i * 100) / total;
-
-	printf("\r%lu bytes -> %lu bytes [%u%%]", i, total, per);
-	fflush(stdout);
-
-	if (per == 100)
-		printf(" - " WHITE_BOLD_E "Done!" END_E "\n");
-}
-
 int
 init_socket(struct sockaddr_in *sock, const char *addr, const uint16_t port)
 {
