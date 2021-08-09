@@ -6,7 +6,7 @@
  *
  * NOTE: true = 1, false = 0
  */
-#define _XOPEN_SOURCE 700
+#define _POSIX_SOURCE
 
 #include <errno.h>
 #include <fcntl.h>
@@ -17,6 +17,7 @@
 #include <string.h>
 #include <unistd.h>
 
+#include <arpa/inet.h>
 #include <sys/stat.h>
 
 #include "ftransfer.h"
@@ -120,10 +121,10 @@ static void
 send_packet(const int socket_d, const packet_t *prop, const char *file_name)
 {
 	int      file;
-	ssize_t  sent_bytes;
-	ssize_t  read_bytes;
-	uint64_t file_size;
-	uint64_t total_bytes = 0;
+	ssize_t  sent_bytes,
+		 read_bytes;
+	uint64_t file_size,
+		 total_bytes = 0;
 	char     content[BUFFER_SIZE];
 
 	/* send file properties */
@@ -133,8 +134,7 @@ send_packet(const int socket_d, const packet_t *prop, const char *file_name)
 		return;
 	}
 
-	file = open(file_name, O_RDONLY, 0);
-	if (file < 0) {
+	if ((file = open(file_name, O_RDONLY)) < 0) {
 		perror(file_name);
 		return;
 	}
@@ -159,7 +159,6 @@ send_packet(const int socket_d, const packet_t *prop, const char *file_name)
 		total_bytes += (uint64_t)sent_bytes;
 	}
 
-	fsync(file);
 	close(file);
 
 	puts(" - " WHITE_BOLD_E "Done!" END_E);
@@ -187,18 +186,7 @@ run_client(int argc, char *argv[])
 	struct   sigaction act;
 	packet_t prop;
 
-	memset(&act, 0, sizeof(struct sigaction));
-
-	act.sa_handler = interrupt_handler;
-	if (sigaction(SIGINT, &act, NULL) < 0)
-		goto err0;
-	if (sigaction(SIGTERM, &act, NULL) < 0)
-		goto err0;
-	if (sigaction(SIGHUP, &act, NULL) < 0)
-		goto err0;
-
-	act.sa_handler = SIG_IGN;
-	if (sigaction(SIGPIPE, &act, NULL) < 0)
+	if (set_sigaction(&act, interrupt_handler) < 0)
 		goto err0;
 
 	if (get_file_prop(&prop, argv) < 0)

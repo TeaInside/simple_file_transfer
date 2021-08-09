@@ -6,7 +6,7 @@
  *
  * NOTE: true = 1, false = 0
  */
-#define _XOPEN_SOURCE 700
+#define _POSIX_SOURCE
 
 #include <errno.h>
 #include <fcntl.h>
@@ -15,6 +15,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+
+#include <arpa/inet.h>
 
 #include "ftransfer.h"
 
@@ -50,8 +52,8 @@ file_verif(const char *filename)
 static int
 init_server(const char *addr, const uint16_t port)
 {
-	int    sock_opt = 1;
-	int    socket_d;
+	int    sock_opt = 1,
+	       socket_d;
 	struct sockaddr_in srv;
 
 	socket_d = init_socket(&srv, addr, port); /* see: ftransfer.h */
@@ -85,17 +87,17 @@ err1:
 static void
 recv_packet(const int socket_d)
 {
-	int       file;
-	int       client_d;
-	ssize_t   recv_bytes;
-	ssize_t   writen_bytes;
-	struct    sockaddr_in client;
-	char      content[BUFFER_SIZE];
+	int       file,
+		  client_d;
+	ssize_t   recv_bytes,
+		  writen_bytes;
 	packet_t  prop;
-	uint64_t  file_size;
-	uint64_t  total_bytes	= 0;
+	struct    sockaddr_in client;
+	uint64_t  file_size,
+		  total_bytes	= 0;
 	socklen_t client_len	= sizeof(struct sockaddr_in);
-	char      full_path[sizeof(DEST_DIR) + sizeof(prop.file_name) +2];
+	char      content[BUFFER_SIZE],
+		  full_path[sizeof(DEST_DIR) + sizeof(prop.file_name) +2];
 	
 	if (listen(socket_d, 3) < 0) {
 		perror("listening");
@@ -114,9 +116,9 @@ recv_packet(const int socket_d)
 		return;
 	}
 
-	memset(&prop, 0, sizeof(packet_t));
 	/* get file properties from client */
 	puts("Receiving file properties...\n");
+	memset(&prop, 0, sizeof(packet_t));
 	recv_bytes = recv(client_d, (packet_t *)&prop, sizeof(packet_t), 0);
 	if (recv_bytes < 0) {
 		perror("recv");
@@ -139,10 +141,7 @@ recv_packet(const int socket_d)
 	/* file handler */
 	snprintf(full_path, sizeof(full_path), "%s/%s", DEST_DIR, prop.file_name);
 
-	file = open(full_path, O_WRONLY | O_CREAT | O_TRUNC,
-				S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
-
-	if (file < 0) {
+	if ((file = open(full_path, O_WRONLY | O_CREAT | O_TRUNC)) < 0) {
 		perror("open_file");
 		goto cleanup1;
 	}
@@ -156,6 +155,12 @@ recv_packet(const int socket_d)
 			break;
 		}
 
+		if (recv_bytes == 0) {
+			errno = ECANCELED;
+			perror("\nrecv");
+			break;
+		}
+
 		writen_bytes = write(file, (char *)&content[0], (size_t)recv_bytes);
 		if (writen_bytes < 0) {
 			perror("\nfwrite");
@@ -163,12 +168,6 @@ recv_packet(const int socket_d)
 		}
 
 		total_bytes += (uint64_t)writen_bytes;
-
-		if (recv_bytes == 0) {
-			errno = ECANCELED;
-			perror("\nrecv");
-			break;
-		}
 	}
 
 	printf("\n\rFlushing buffer...");
@@ -204,18 +203,7 @@ run_server(int argc, char *argv[])
 	int	 socket_d = 0;
 	struct   sigaction act;
 
-	memset((struct sigaction *)&act, 0, sizeof(struct sigaction));
-
-	act.sa_handler= interrupt_handler;
-	if (sigaction(SIGINT, &act, NULL) < 0)
-		goto err;
-	if (sigaction(SIGTERM, &act, NULL) < 0)
-		goto err;
-	if (sigaction(SIGHUP, &act, NULL) < 0)
-		goto err;
-
-	act.sa_handler = SIG_IGN;
-	if (sigaction(SIGPIPE, &act, NULL) < 0)
+	if (set_sigaction(&act, interrupt_handler) < 0)
 		goto err;
 
 	if ((socket_d = init_server(argv[0], (uint16_t)atoi(argv[1]))) < 0)

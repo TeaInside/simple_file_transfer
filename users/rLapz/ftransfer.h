@@ -9,7 +9,6 @@
 #define FTRANSFER_H
 
 #include <stdint.h>
-#include <arpa/inet.h>
 
 #include "config.h"
 
@@ -24,6 +23,7 @@ typedef struct __attribute__((packed)) packet_t {
 void print_help(FILE *f);
 int  init_socket(struct sockaddr_in *sock,
 			const char *addr, const uint16_t port);
+int  set_sigaction(struct sigaction *act, void (*f)(int));
 int  run_client(int argc, char *argv[]);
 int  run_server(int argc, char *argv[]);
 

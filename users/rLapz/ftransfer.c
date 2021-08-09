@@ -4,10 +4,14 @@
  *
  * Copyright (C) 2021  Arthur Lapz <rlapz@gnuweeb.org>
  */
+#define _POSIX_SOURCE
 
 #include <errno.h>
+#include <signal.h>
 #include <stdio.h>
 #include <string.h>
+
+#include <arpa/inet.h>
 
 #include "ftransfer.h"
 
@@ -31,7 +35,7 @@ init_socket(struct sockaddr_in *sock, const char *addr, const uint16_t port)
 {
 	int socket_d = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 	if (socket_d < 0)
-		return -1;
+		goto ret;
 
 	memset(sock, 0, sizeof(struct sockaddr_in));
 
@@ -40,7 +44,31 @@ init_socket(struct sockaddr_in *sock, const char *addr, const uint16_t port)
 	sock->sin_addr.s_addr = inet_addr(addr);
 	sock->sin_port        = htons(port);
 
+ret:
 	return socket_d;
+}
+
+int
+set_sigaction(struct sigaction *act, void (*f)(int))
+{
+	memset(act, 0, sizeof(struct sigaction));
+
+	act->sa_handler = f;
+	if (sigaction(SIGINT, act, NULL) < 0)
+		goto err;
+	if (sigaction(SIGTERM, act, NULL) < 0)
+		goto err;
+	if (sigaction(SIGHUP, act, NULL) < 0)
+		goto err;
+
+	act->sa_handler = SIG_IGN;
+	if (sigaction(SIGPIPE, act, NULL) < 0)
+		goto err;
+
+	return 0;
+
+err:
+	return -1;
 }
 
 
