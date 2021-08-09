@@ -6,7 +6,7 @@
  *
  * NOTE: true = 1, false = 0
  */
-#define _POSIX_SOURCE
+#define _POSIX_C_SOURCE 200809L
 
 #include <errno.h>
 #include <fcntl.h>
@@ -29,6 +29,9 @@ static int   init_client       (const char *addr, const uint16_t port);
 static void  send_packet       (const int socket_d, const packet_t *prop,
 		                     const char *file_name);
 
+/* applying the configuration */
+#include "config.h"
+
 /* global variables */
 static volatile int is_interrupted = 0;
 
@@ -39,6 +42,7 @@ interrupt_handler(int sig)
 {
 	is_interrupted = 1;
 	errno          = EINTR;
+
 	(void)sig;
 }
 
@@ -181,7 +185,7 @@ run_client(int argc, char *argv[])
 	printf(WHITE_BOLD_E "Client started" END_E "\n");
 	printf(WHITE_BOLD_E "Buffer size: %u" END_E "\n\n", BUFFER_SIZE);
 
-	int	 socket_d  = 0;
+	int	 socket_d;
 	struct   sigaction act;
 	packet_t prop;
 

@@ -6,7 +6,7 @@
  *
  * NOTE: true = 1, false = 0
  */
-#define _POSIX_SOURCE
+#define _POSIX_C_SOURCE 200809L
 
 #include <errno.h>
 #include <fcntl.h>
@@ -22,9 +22,12 @@
 
 /* function declarations */
 static void  interrupt_handler (int sig);
-static int   file_verif        (const char *filename);
 static int   init_server       (const char *addr, const uint16_t port);
+static int   file_verif        (const char *filename);
 static void  recv_packet       (const int socket_d);
+
+/* applying the configuration */
+#include "config.h"
 
 /* global variables */
 static volatile int is_interrupted = 0;
@@ -35,17 +38,8 @@ interrupt_handler(int sig)
 {
 	is_interrupted = 1;
 	errno          = EINTR;
-	(void)sig;
-}
 
-static int
-file_verif(const char *filename)
-{
-	if (strstr(filename, "..") != NULL) {
-		errno = EINVAL;
-		return -1;
-	}
-	return 0;
+	(void)sig;
 }
 
 static int
@@ -83,6 +77,16 @@ err1:
 	return -1;
 }
 
+static int
+file_verif(const char *filename)
+{
+	if (strstr(filename, "..") != NULL) {
+		errno = EINVAL;
+		return -1;
+	}
+	return 0;
+}
+
 static void
 recv_packet(const int socket_d)
 {
@@ -96,7 +100,7 @@ recv_packet(const int socket_d)
 		  total_bytes	= 0;
 	socklen_t client_len	= sizeof(struct sockaddr_in);
 	char      content[BUFFER_SIZE],
-		  full_path[sizeof(DEST_DIR) + sizeof(prop.file_name) +2];
+		  full_path[sizeof(DEST_DIR) + sizeof(prop.file_name)];
 	
 	if (listen(socket_d, 3) < 0) {
 		perror("listening");
@@ -133,8 +137,7 @@ recv_packet(const int socket_d)
 
 	printf(WHITE_BOLD_E "File info [%s:%d]" END_E "\n",
 			inet_ntoa(client.sin_addr), ntohs(client.sin_port));
-	printf("|-> File name   : %s (%u)\n",
-			prop.file_name, prop.file_name_len);
+	printf("|-> File name   : %s (%u)\n", prop.file_name, prop.file_name_len);
 	printf("`-> File size   : %lu bytes\n", file_size);
 
 	/* file handler */
@@ -199,7 +202,7 @@ run_server(int argc, char *argv[])
 	printf(WHITE_BOLD_E "Server started [%s:%s]" END_E "\n", argv[0], argv[1]);
 	printf(WHITE_BOLD_E "Buffer size: %u" END_E"\n\n", BUFFER_SIZE);
 
-	int	 socket_d = 0;
+	int	 socket_d;
 	struct   sigaction act;
 
 	if (set_sigaction(&act, interrupt_handler) < 0) /* see: ftransfer.c */

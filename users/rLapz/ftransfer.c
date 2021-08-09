@@ -4,7 +4,7 @@
  *
  * Copyright (C) 2021  Arthur Lapz <rlapz@gnuweeb.org>
  */
-#define _POSIX_SOURCE
+#define _POSIX_C_SOURCE 200809L
 
 #include <errno.h>
 #include <signal.h>
@@ -49,7 +49,7 @@ ret:
 }
 
 int
-set_sigaction(struct sigaction *act, const void (*func)(int))
+set_sigaction(struct sigaction *act, void (*func)(int))
 {
 	memset(act, 0, sizeof(struct sigaction));
 
@@ -94,3 +94,4 @@ main(int argc, char *argv[])
 
 	return errno;
 }
+
