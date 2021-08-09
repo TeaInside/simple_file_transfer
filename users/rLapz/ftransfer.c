@@ -4,7 +4,6 @@
  *
  * Copyright (C) 2021  Arthur Lapz <rlapz@gnuweeb.org>
  */
-#define _POSIX_C_SOURCE 200809L
 
 #include <errno.h>
 #include <signal.h>
@@ -18,35 +17,6 @@
 /* global variables */
 static const char *app = NULL;
 
-
-void
-print_help(FILE *f)
-{
-	if (f == stderr)
-		perror(NULL);
-
-	fprintf(f, "Usage: \n");
-	fprintf(f, "  %s server [bind_addr] [bind_port]\n", app);
-	fprintf(f, "  %s client [server_addr] [server_port] [filename]\n", app);
-}
-
-int
-init_socket(struct sockaddr_in *sock, const char *addr, const uint16_t port)
-{
-	int socket_d = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-	if (socket_d < 0)
-		goto ret;
-
-	memset(sock, 0, sizeof(struct sockaddr_in));
-
-	/* TCP configuration */
-	sock->sin_family      = AF_INET;
-	sock->sin_addr.s_addr = inet_addr(addr);
-	sock->sin_port        = htons(port);
-
-ret:
-	return socket_d;
-}
 
 int
 set_sigaction(struct sigaction *act, void (*func)(int))
@@ -69,6 +39,35 @@ set_sigaction(struct sigaction *act, void (*func)(int))
 
 err:
 	return -1;
+}
+
+int
+init_socket(struct sockaddr_in *sock, const char *addr, const uint16_t port)
+{
+	int socket_d = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+	if (socket_d < 0)
+		goto ret;
+
+	memset(sock, 0, sizeof(struct sockaddr_in));
+
+	/* TCP configuration */
+	sock->sin_family      = AF_INET;
+	sock->sin_addr.s_addr = inet_addr(addr);
+	sock->sin_port        = htons(port);
+
+ret:
+	return socket_d;
+}
+
+void
+print_help(FILE *f)
+{
+	if (f == stderr)
+		perror(NULL);
+
+	fprintf(f, "Usage: \n");
+	fprintf(f, "  %s server [bind_addr] [bind_port]\n", app);
+	fprintf(f, "  %s client [server_addr] [server_port] [filename]\n", app);
 }
 
 

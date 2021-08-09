@@ -6,7 +6,6 @@
  *
  * NOTE: true = 1, false = 0
  */
-#define _POSIX_C_SOURCE 200809L
 
 #include <errno.h>
 #include <fcntl.h>
@@ -23,6 +22,8 @@
 /* function declarations */
 static void  interrupt_handler (int sig);
 static int   init_server       (const char *addr, const uint16_t port);
+static int   get_file_prop     (const int socket_d, packet_t *prop,
+					struct sockaddr_in *client);
 static int   file_verif        (const char *filename);
 static void  recv_packet       (const int socket_d);
 
@@ -78,11 +79,40 @@ err1:
 }
 
 static int
+get_file_prop(const int client_d, packet_t *prop, struct sockaddr_in *client)
+{
+	ssize_t recv_bytes;
+
+	puts("Receiving file properties...\n");
+	memset(prop, 0, sizeof(packet_t));
+	recv_bytes = recv(client_d, (packet_t *)prop, sizeof(packet_t), 0);
+	if (recv_bytes < 0) {
+		perror("recv");
+		goto err;
+	}
+
+	if (file_verif(prop->file_name) < 0) {
+		fputs("Invalid file name! :p\n\n\n", stderr);
+		goto err;
+	}
+
+	printf(WHITE_BOLD_E "File info [%s:%d]" END_E "\n",
+			inet_ntoa(client->sin_addr), ntohs(client->sin_port));
+	printf("|-> File name   : %s (%u)\n", prop->file_name, prop->file_name_len);
+	printf("`-> File size   : %lu bytes\n", prop->file_size);
+
+	return 0;
+
+err:
+	return -errno;
+}
+
+static int
 file_verif(const char *filename)
 {
 	if (strstr(filename, "..") != NULL) {
 		errno = EINVAL;
-		return -1;
+		return -errno;
 	}
 	return 0;
 }
@@ -120,25 +150,10 @@ recv_packet(const int socket_d)
 	}
 
 	/* get file properties from client */
-	puts("Receiving file properties...\n");
-	memset(&prop, 0, sizeof(packet_t));
-	recv_bytes = recv(client_d, (packet_t *)&prop, sizeof(packet_t), 0);
-	if (recv_bytes < 0) {
-		perror("recv");
+	if (get_file_prop(client_d, &prop, &client) < 0)
 		goto cleanup1;
-	}
-
-	if (file_verif(prop.file_name) < 0) {
-		fputs("Invalid file name! :p\n\n\n", stderr);
-		goto cleanup1;
-	}
 
 	file_size = prop.file_size;
-
-	printf(WHITE_BOLD_E "File info [%s:%d]" END_E "\n",
-			inet_ntoa(client.sin_addr), ntohs(client.sin_port));
-	printf("|-> File name   : %s (%u)\n", prop.file_name, prop.file_name_len);
-	printf("`-> File size   : %lu bytes\n", file_size);
 
 	/* file handler */
 	snprintf(full_path, sizeof(full_path), "%s/%s", DEST_DIR, prop.file_name);

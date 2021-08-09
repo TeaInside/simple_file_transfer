@@ -6,7 +6,6 @@
  *
  * NOTE: true = 1, false = 0
  */
-#define _POSIX_C_SOURCE 200809L
 
 #include <errno.h>
 #include <fcntl.h>
@@ -24,10 +23,9 @@
 
 /* function declarations */
 static void  interrupt_handler (int sig);
-static int   get_file_prop     (packet_t *prop, char *argv[]);
 static int   init_client       (const char *addr, const uint16_t port);
-static void  send_packet       (const int socket_d, const packet_t *prop,
-		                     const char *file_name);
+static void  send_packet       (const int socket_d, char *argv[]);
+static int   get_file_prop     (packet_t *prop, char *argv[]);
 
 /* applying the configuration */
 #include "config.h"
@@ -44,6 +42,93 @@ interrupt_handler(int sig)
 	errno          = EINTR;
 
 	(void)sig;
+}
+
+static int
+init_client(const char *addr, const uint16_t port)
+{
+	int socket_d;
+	struct sockaddr_in sock;
+
+	socket_d = init_socket(&sock, addr, port); /* see: ftransfer.c */
+	if (socket_d < 0) {
+		perror("\nsocket:");
+		goto err1;
+	}
+
+	printf("\nConnecting...");
+	fflush(stdout);
+
+	if (connect(socket_d, (struct sockaddr *)&sock, sizeof(sock)) < 0) {
+		perror("\nconnect");
+		goto err0;
+	}
+
+	puts("\rConnected to the server!\n");
+	return socket_d;
+
+err0:
+	close(socket_d);
+
+err1:
+	puts("\r");
+	return -errno;
+}
+
+static void
+send_packet(const int socket_d, char *argv[])
+{
+	int      file;
+	ssize_t  sent_bytes,
+		 read_bytes;
+	uint64_t file_size,
+		 total_bytes = 0;
+	char     content[BUFFER_SIZE];
+	packet_t prop;
+
+	/* get file properties */
+	if (get_file_prop(&prop, argv) < 0)
+		return;
+
+	/* send file properties */
+	sent_bytes = send(socket_d, (packet_t *)&prop, sizeof(packet_t), 0);
+	if (sent_bytes < 0) {
+		perror("send");
+		return;
+	}
+
+	if ((file = open(prop.file_name, O_RDONLY)) < 0) {
+		perror(prop.file_name);
+		return;
+	}
+
+	file_size = prop.file_size;
+
+	puts("\nSending...");
+
+	while (total_bytes < file_size && is_interrupted == 0) {
+		read_bytes = read(file, (char*)&content[0], BUFFER_SIZE);
+		if (read_bytes < 0) {
+			perror("\nread");
+			break;
+		}
+
+		sent_bytes = send(socket_d, (char*)&content[0], (size_t)read_bytes, 0);
+		if (sent_bytes < 0) {
+			perror("\nsend");
+			break;
+		}
+
+		total_bytes += (uint64_t)sent_bytes;
+	}
+
+	printf("\n\rFlushing buffer...");
+	fflush(stdout);
+	
+	fsync(file);
+	close(file);
+
+	puts(" - " WHITE_BOLD_E "Done!" END_E);
 }
 
 static int
@@ -89,84 +174,6 @@ err:
 	return -errno;
 }
 
-static int
-init_client(const char *addr, const uint16_t port)
-{
-	int socket_d;
-	struct sockaddr_in sock;
-
-	socket_d = init_socket(&sock, addr, port); /* see: ftransfer.c */
-	if (socket_d < 0) {
-		perror("\nsocket:");
-		goto err1;
-	}
-
-	printf("\nConnecting...");
-	fflush(stdout);
-
-	if (connect(socket_d, (struct sockaddr *)&sock, sizeof(sock)) < 0) {
-		perror("\nconnect");
-		goto err0;
-	}
-
-	puts("\rConnected to the server!\n");
-	return socket_d;
-
-err0:
-	close(socket_d);
-
-err1:
-	puts("\r");
-	return -errno;
-}
-
-static void
-send_packet(const int socket_d, const packet_t *prop, const char *file_name)
-{
-	int      file;
-	ssize_t  sent_bytes,
-		 read_bytes;
-	uint64_t file_size,
-		 total_bytes = 0;
-	char     content[BUFFER_SIZE];
-
-	/* send file properties */
-	sent_bytes = send(socket_d, (packet_t *)prop, sizeof(packet_t), 0);
-	if (sent_bytes < 0) {
-		perror("send");
-		return;
-	}
-
-	if ((file = open(file_name, O_RDONLY)) < 0) {
-		perror(file_name);
-		return;
-	}
-
-	file_size = prop->file_size;
-
-	puts("Sending...");
-
-	while (total_bytes < file_size && is_interrupted == 0) {
-		read_bytes = read(file, (char*)&content[0], BUFFER_SIZE);
-		if (read_bytes < 0) {
-			perror("\nread");
-			break;
-		}
-
-		sent_bytes = send(socket_d, (char*)&content[0], (size_t)read_bytes, 0);
-		if (sent_bytes < 0) {
-			perror("\nsend");
-			break;
-		}
-
-		total_bytes += (uint64_t)sent_bytes;
-	}
-
-	close(file);
-
-	puts(" - " WHITE_BOLD_E "Done!" END_E);
-}
-
 int
 run_client(int argc, char *argv[])
 {
@@ -187,18 +194,14 @@ run_client(int argc, char *argv[])
 
 	int	 socket_d;
 	struct   sigaction act;
-	packet_t prop;
 
 	if (set_sigaction(&act, interrupt_handler) < 0) /* see: ftransfer.c */
 		goto err0;
 
-	if (get_file_prop(&prop, argv) < 0)
-		goto err1;
-
 	if ((socket_d = init_client(argv[0], (uint16_t)atoi(argv[1]))) < 0)
 		goto err1;
 
-	send_packet(socket_d, &prop, argv[2]);
+	send_packet(socket_d, argv);
 	close(socket_d);
 
 	if (errno != 0)
