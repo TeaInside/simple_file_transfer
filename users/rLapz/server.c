@@ -24,7 +24,7 @@ static void  interrupt_handler (int sig);
 static int   init_server       (const char *addr, const uint16_t port);
 static int   get_file_prop     (const int socket_d, packet_t *prop,
 					struct sockaddr_in *client);
-static int   file_verif        (const char *filename);
+static int   file_verif        (const packet_t *prop);
 static void  recv_packet       (const int socket_d);
 
 /* applying the configuration */
@@ -91,8 +91,8 @@ get_file_prop(const int client_d, packet_t *prop, struct sockaddr_in *client)
 		goto err;
 	}
 
-	if (file_verif(prop->file_name) < 0) {
-		fputs("Invalid file name! :p\n\n\n", stderr);
+	if (file_verif(prop) < 0) {
+		fputs("Invalid file name! :p\n\n", stderr);
 		goto err;
 	}
 
@@ -108,12 +108,13 @@ err:
 }
 
 static int
-file_verif(const char *filename)
+file_verif(const packet_t *prop)
 {
-	if (strstr(filename, "..") != NULL) {
+	if (prop->file_name_len== 0 || strstr(prop->file_name, "..") != NULL) {
 		errno = EINVAL;
 		return -errno;
 	}
+
 	return 0;
 }
 
