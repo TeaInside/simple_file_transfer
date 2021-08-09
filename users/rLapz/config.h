@@ -1,5 +1,5 @@
 #define DEST_DIR	"uploaded_files"
-#define BUFFER_SIZE	4096
+#define BUFFER_SIZE	8192
 
 /* colors */
 #define  WHITE_BOLD_E	"\033[01;37m"

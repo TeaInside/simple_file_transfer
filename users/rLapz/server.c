@@ -6,54 +6,51 @@
  *
  * NOTE: true = 1, false = 0
  */
-#define _XOPEN_SOURCE 700
 
 #include <errno.h>
+#include <fcntl.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
+#include <arpa/inet.h>
+
 #include "ftransfer.h"
 
 /* function declarations */
 static void  interrupt_handler (int sig);
-static int   file_verif        (const char *filename);
 static int   init_server       (const char *addr, const uint16_t port);
+static int   get_file_prop     (const int socket_d, packet_t *prop,
+					struct sockaddr_in *client);
+static int   file_verif        (const char *filename);
 static void  recv_packet       (const int socket_d);
-int          run_server        (int argc, char *argv[]);
+
+/* applying the configuration */
+#include "config.h"
 
 /* global variables */
-static volatile int interrupted = 0;
+static volatile int is_interrupted = 0;
 
 /* function implementations */
 static void
 interrupt_handler(int sig)
 {
-	interrupted  = 1;
-	errno        = EINTR;
-	(void)sig;
-}
+	is_interrupted = 1;
+	errno          = EINTR;
 
-static int
-file_verif(const char *filename)
-{
-	if (strstr(filename, "..") != NULL) {
-		errno = EINVAL;
-		return -1;
-	}
-	return 0;
+	(void)sig;
 }
 
 static int
 init_server(const char *addr, const uint16_t port)
 {
-	int    sock_opt = 1;
-	int    socket_d;
+	int    sock_opt = 1,
+	       socket_d;
 	struct sockaddr_in srv;
 
-	socket_d = init_socket(&srv, addr, port); /* see: ftransfer.h */
+	socket_d = init_socket(&srv, addr, port); /* see: ftransfer.c */
 	if (socket_d < 0) {
 		perror("socket");
 		goto err1;
@@ -81,19 +78,59 @@ err1:
 	return -1;
 }
 
+static int
+get_file_prop(const int client_d, packet_t *prop, struct sockaddr_in *client)
+{
+	ssize_t recv_bytes;
+
+	puts("Receiving file properties...\n");
+	memset(prop, 0, sizeof(packet_t));
+	recv_bytes = recv(client_d, (packet_t *)prop, sizeof(packet_t), 0);
+	if (recv_bytes < 0) {
+		perror("recv");
+		goto err;
+	}
+
+	if (file_verif(prop->file_name) < 0) {
+		fputs("Invalid file name! :p\n\n\n", stderr);
+		goto err;
+	}
+
+	printf(WHITE_BOLD_E "File info [%s:%d]" END_E "\n",
+			inet_ntoa(client->sin_addr), ntohs(client->sin_port));
+	printf("|-> File name   : %s (%u)\n", prop->file_name, prop->file_name_len);
+	printf("`-> File size   : %lu bytes\n", prop->file_size);
+
+	return 0;
+
+err:
+	return -errno;
+}
+
+static int
+file_verif(const char *filename)
+{
+	if (strstr(filename, "..") != NULL) {
+		errno = EINVAL;
+		return -errno;
+	}
+	return 0;
+}
+
 static void
 recv_packet(const int socket_d)
 {
-	FILE     *file;
-	int       client_d;
-	ssize_t   recv_bytes;
-	size_t    writen_bytes;
-	struct    sockaddr_in client;
-	char      content[BUFFER_SIZE];
+	int       file,
+		  client_d;
+	ssize_t   recv_bytes,
+		  writen_bytes;
 	packet_t  prop;
-	uint64_t  file_size;
-	uint64_t  total_bytes	= 0;
+	struct    sockaddr_in client;
+	uint64_t  file_size,
+		  total_bytes	= 0;
 	socklen_t client_len	= sizeof(struct sockaddr_in);
+	char      content[BUFFER_SIZE],
+		  full_path[sizeof(DEST_DIR) + sizeof(prop.file_name)];
 	
 	if (listen(socket_d, 3) < 0) {
 		perror("listening");
@@ -112,68 +149,49 @@ recv_packet(const int socket_d)
 		return;
 	}
 
-	memset(&prop, 0, sizeof(packet_t));
 	/* get file properties from client */
-	puts("Receiving file properties...\n");
-	recv_bytes = recv(client_d, (packet_t *)&prop, sizeof(packet_t), 0);
-	if (recv_bytes < 0) {
-		perror("recv");
+	if (get_file_prop(client_d, &prop, &client) < 0)
 		goto cleanup1;
-	}
-
-	if (file_verif(prop.file_name) < 0) {
-		fputs("Invalid file name! :p\n\n\n", stderr);
-		goto cleanup1;
-	}
 
 	file_size = prop.file_size;
 
-	printf(WHITE_BOLD_E "File info [%s:%d]" END_E "\n",
-			inet_ntoa(client.sin_addr), ntohs(client.sin_port));
-	printf("|-> File name   : %s (%u)\n",
-			prop.file_name, prop.file_name_len);
-	printf("`-> File size   : %lu bytes\n", file_size);
-
 	/* file handler */
-	char full_path[sizeof(DEST_DIR) + sizeof(prop.file_name) +2];
-	snprintf(full_path, sizeof(full_path), "%s/%s",
-			DEST_DIR, prop.file_name);
+	snprintf(full_path, sizeof(full_path), "%s/%s", DEST_DIR, prop.file_name);
 
-	file = fopen(full_path, "w");
-	if (file == NULL) {
+	if ((file = open(full_path, O_WRONLY | O_CREAT | O_TRUNC)) < 0) {
 		perror("open_file");
 		goto cleanup1;
 	}
 
 	puts("\nwriting...");
 	/* receive & write to disk */
-	while (total_bytes < file_size && interrupted == 0) {
-		recv_bytes = recv(client_d, (char *)content, BUFFER_SIZE, 0);
+	while (total_bytes < file_size && is_interrupted == 0) {
+		recv_bytes = recv(client_d, (char *)&content[0], BUFFER_SIZE, 0);
 		if (recv_bytes < 0) {
 			perror("\nrecv");
 			break;
 		}
-
-		writen_bytes = fwrite((char *)content, 1, (size_t)recv_bytes, file);
-		if (ferror(file)) {
-			perror("\nfwrite");
-			break;
-		}
-
-		total_bytes += (uint64_t)writen_bytes;
 
 		if (recv_bytes == 0) {
 			errno = ECANCELED;
 			perror("\nrecv");
 			break;
 		}
+
+		writen_bytes = write(file, (char *)&content[0], (size_t)recv_bytes);
+		if (writen_bytes < 0) {
+			perror("\nfwrite");
+			break;
+		}
+
+		total_bytes += (uint64_t)writen_bytes;
 	}
 
 	printf("\n\rFlushing buffer...");
 	fflush(stdout);
 
-	fflush(file);
-	fclose(file);
+	fsync(file);
+	close(file);
 
 	puts(" - " WHITE_BOLD_E "Done!" END_E);
 
@@ -199,28 +217,17 @@ run_server(int argc, char *argv[])
 	printf(WHITE_BOLD_E "Server started [%s:%s]" END_E "\n", argv[0], argv[1]);
 	printf(WHITE_BOLD_E "Buffer size: %u" END_E"\n\n", BUFFER_SIZE);
 
-	int	 socket_d = 0;
+	int	 socket_d;
 	struct   sigaction act;
 
-	memset((struct sigaction *)&act, 0, sizeof(struct sigaction));
-
-	act.sa_handler= interrupt_handler;
-	if (sigaction(SIGINT, &act, NULL) < 0)
-		goto err;
-	if (sigaction(SIGTERM, &act, NULL) < 0)
-		goto err;
-	if (sigaction(SIGHUP, &act, NULL) < 0)
-		goto err;
-
-	act.sa_handler = SIG_IGN;
-	if (sigaction(SIGPIPE, &act, NULL) < 0)
+	if (set_sigaction(&act, interrupt_handler) < 0) /* see: ftransfer.c */
 		goto err;
 
 	if ((socket_d = init_server(argv[0], (uint16_t)atoi(argv[1]))) < 0)
 		goto err;
 
 	/* main loop */
-	while (interrupted == 0)
+	while (is_interrupted == 0)
 		recv_packet(socket_d);
 	/* end main loop */
 
