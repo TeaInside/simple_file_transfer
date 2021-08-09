@@ -9,6 +9,7 @@
 #define _XOPEN_SOURCE 700
 
 #include <errno.h>
+#include <fcntl.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -84,16 +85,17 @@ err1:
 static void
 recv_packet(const int socket_d)
 {
-	FILE     *file;
+	int       file;
 	int       client_d;
 	ssize_t   recv_bytes;
-	size_t    writen_bytes;
+	ssize_t   writen_bytes;
 	struct    sockaddr_in client;
 	char      content[BUFFER_SIZE];
 	packet_t  prop;
 	uint64_t  file_size;
 	uint64_t  total_bytes	= 0;
 	socklen_t client_len	= sizeof(struct sockaddr_in);
+	char      full_path[sizeof(DEST_DIR) + sizeof(prop.file_name) +2];
 	
 	if (listen(socket_d, 3) < 0) {
 		perror("listening");
@@ -135,12 +137,12 @@ recv_packet(const int socket_d)
 	printf("`-> File size   : %lu bytes\n", file_size);
 
 	/* file handler */
-	char full_path[sizeof(DEST_DIR) + sizeof(prop.file_name) +2];
-	snprintf(full_path, sizeof(full_path), "%s/%s",
-			DEST_DIR, prop.file_name);
+	snprintf(full_path, sizeof(full_path), "%s/%s", DEST_DIR, prop.file_name);
 
-	file = fopen(full_path, "w");
-	if (file == NULL) {
+	file = open(full_path, O_WRONLY | O_CREAT | O_TRUNC,
+				S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+
+	if (file < 0) {
 		perror("open_file");
 		goto cleanup1;
 	}
@@ -148,14 +150,14 @@ recv_packet(const int socket_d)
 	puts("\nwriting...");
 	/* receive & write to disk */
 	while (total_bytes < file_size && interrupted == 0) {
-		recv_bytes = recv(client_d, (char *)content, BUFFER_SIZE, 0);
+		recv_bytes = recv(client_d, (char *)&content[0], BUFFER_SIZE, 0);
 		if (recv_bytes < 0) {
 			perror("\nrecv");
 			break;
 		}
 
-		writen_bytes = fwrite((char *)content, 1, (size_t)recv_bytes, file);
-		if (ferror(file)) {
+		writen_bytes = write(file, (char *)&content[0], (size_t)recv_bytes);
+		if (writen_bytes < 0) {
 			perror("\nfwrite");
 			break;
 		}
@@ -172,8 +174,8 @@ recv_packet(const int socket_d)
 	printf("\n\rFlushing buffer...");
 	fflush(stdout);
 
-	fflush(file);
-	fclose(file);
+	fsync(file);
+	close(file);
 
 	puts(" - " WHITE_BOLD_E "Done!" END_E);
 

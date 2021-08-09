@@ -9,6 +9,7 @@
 #define _XOPEN_SOURCE 700
 
 #include <errno.h>
+#include <fcntl.h>
 #include <libgen.h>
 #include <signal.h>
 #include <stdio.h>
@@ -118,22 +119,22 @@ err1:
 static void
 send_packet(const int socket_d, const packet_t *prop, const char *file_name)
 {
-	FILE	*file;
-	ssize_t  send_bytes;
-	size_t	 read_bytes;
+	int      file;
+	ssize_t  sent_bytes;
+	ssize_t  read_bytes;
 	uint64_t file_size;
-	uint64_t bytes_sent = 0;
-	char	 content[BUFFER_SIZE];
+	uint64_t total_bytes = 0;
+	char     content[BUFFER_SIZE];
 
 	/* send file properties */
-	send_bytes = send(socket_d, (packet_t *)prop, sizeof(packet_t), 0);
-	if (send_bytes < 0) {
+	sent_bytes = send(socket_d, (packet_t *)prop, sizeof(packet_t), 0);
+	if (sent_bytes < 0) {
 		perror("send");
 		return;
 	}
 
-	file = fopen(file_name, "r");
-	if (file == NULL) {
+	file = open(file_name, O_RDONLY, 0);
+	if (file < 0) {
 		perror(file_name);
 		return;
 	}
@@ -141,28 +142,25 @@ send_packet(const int socket_d, const packet_t *prop, const char *file_name)
 	file_size = prop->file_size;
 
 	puts("Sending...");
-	/* send the packet */
-	while (bytes_sent < file_size && !feof(file) && interrupted == 0) {
-		read_bytes = fread((char *)&content[0], 1, BUFFER_SIZE, file);
-		if (ferror(file)) {
-			perror("\nfread");
+
+	while (total_bytes < file_size && interrupted == 0) {
+		read_bytes = read(file, (char*)&content[0], BUFFER_SIZE);
+		if (read_bytes < 0) {
+			perror("\nread");
 			break;
 		}
-		
-		send_bytes = send(socket_d, (char *)&content[0], read_bytes, 0);
-		if (send_bytes < 0) {
+
+		sent_bytes = send(socket_d, (char*)&content[0], (size_t)read_bytes, 0);
+		if (sent_bytes < 0) {
 			perror("\nsend");
 			break;
 		}
 
-		bytes_sent += (uint64_t)send_bytes;
+		total_bytes += (uint64_t)sent_bytes;
 	}
 
-	printf("\n\rFlushing buffer...");
-	fflush(stdout);
-
-	fflush(file);
-	fclose(file);
+	fsync(file);
+	close(file);
 
 	puts(" - " WHITE_BOLD_E "Done!" END_E);
 }
