@@ -28,18 +28,17 @@ static int   get_file_prop     (packet_t *prop, char *argv[]);
 static int   init_client       (const char *addr, const uint16_t port);
 static void  send_packet       (const int socket_d, const packet_t *prop,
 		                     const char *file_name);
-int          run_client        (int argc, char *argv[]);
 
 /* global variables */
-static volatile int interrupted = 0;
+static volatile int is_interrupted = 0;
 
 
 /* function implementations */
 static void
 interrupt_handler(int sig)
 {
-	interrupted = 1;
-	errno       = EINTR;
+	is_interrupted = 1;
+	errno          = EINTR;
 	(void)sig;
 }
 
@@ -92,7 +91,7 @@ init_client(const char *addr, const uint16_t port)
 	int socket_d;
 	struct sockaddr_in sock;
 
-	socket_d = init_socket(&sock, addr, port); /* see: ftransfer.h */
+	socket_d = init_socket(&sock, addr, port); /* see: ftransfer.c */
 	if (socket_d < 0) {
 		perror("\nsocket:");
 		goto err1;
@@ -143,7 +142,7 @@ send_packet(const int socket_d, const packet_t *prop, const char *file_name)
 
 	puts("Sending...");
 
-	while (total_bytes < file_size && interrupted == 0) {
+	while (total_bytes < file_size && is_interrupted == 0) {
 		read_bytes = read(file, (char*)&content[0], BUFFER_SIZE);
 		if (read_bytes < 0) {
 			perror("\nread");
@@ -186,7 +185,7 @@ run_client(int argc, char *argv[])
 	struct   sigaction act;
 	packet_t prop;
 
-	if (set_sigaction(&act, interrupt_handler) < 0)
+	if (set_sigaction(&act, interrupt_handler) < 0) /* see: ftransfer.c */
 		goto err0;
 
 	if (get_file_prop(&prop, argv) < 0)

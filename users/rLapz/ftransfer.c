@@ -49,11 +49,11 @@ ret:
 }
 
 int
-set_sigaction(struct sigaction *act, void (*f)(int))
+set_sigaction(struct sigaction *act, const void (*func)(int))
 {
 	memset(act, 0, sizeof(struct sigaction));
 
-	act->sa_handler = f;
+	act->sa_handler = func;
 	if (sigaction(SIGINT, act, NULL) < 0)
 		goto err;
 	if (sigaction(SIGTERM, act, NULL) < 0)

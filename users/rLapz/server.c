@@ -25,17 +25,16 @@ static void  interrupt_handler (int sig);
 static int   file_verif        (const char *filename);
 static int   init_server       (const char *addr, const uint16_t port);
 static void  recv_packet       (const int socket_d);
-int          run_server        (int argc, char *argv[]);
 
 /* global variables */
-static volatile int interrupted = 0;
+static volatile int is_interrupted = 0;
 
 /* function implementations */
 static void
 interrupt_handler(int sig)
 {
-	interrupted  = 1;
-	errno        = EINTR;
+	is_interrupted = 1;
+	errno          = EINTR;
 	(void)sig;
 }
 
@@ -56,7 +55,7 @@ init_server(const char *addr, const uint16_t port)
 	       socket_d;
 	struct sockaddr_in srv;
 
-	socket_d = init_socket(&srv, addr, port); /* see: ftransfer.h */
+	socket_d = init_socket(&srv, addr, port); /* see: ftransfer.c */
 	if (socket_d < 0) {
 		perror("socket");
 		goto err1;
@@ -148,7 +147,7 @@ recv_packet(const int socket_d)
 
 	puts("\nwriting...");
 	/* receive & write to disk */
-	while (total_bytes < file_size && interrupted == 0) {
+	while (total_bytes < file_size && is_interrupted == 0) {
 		recv_bytes = recv(client_d, (char *)&content[0], BUFFER_SIZE, 0);
 		if (recv_bytes < 0) {
 			perror("\nrecv");
@@ -203,14 +202,14 @@ run_server(int argc, char *argv[])
 	int	 socket_d = 0;
 	struct   sigaction act;
 
-	if (set_sigaction(&act, interrupt_handler) < 0)
+	if (set_sigaction(&act, interrupt_handler) < 0) /* see: ftransfer.c */
 		goto err;
 
 	if ((socket_d = init_server(argv[0], (uint16_t)atoi(argv[1]))) < 0)
 		goto err;
 
 	/* main loop */
-	while (interrupted == 0)
+	while (is_interrupted == 0)
 		recv_packet(socket_d);
 	/* end main loop */
 
