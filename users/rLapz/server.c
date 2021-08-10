@@ -24,7 +24,6 @@ static void  interrupt_handler (int sig);
 static int   init_server       (const char *addr, const uint16_t port);
 static int   get_file_prop     (const int socket_d, packet_t *prop,
 					struct sockaddr_in *client);
-static int   file_verif        (const packet_t *prop);
 static void  recv_packet       (const int socket_d);
 
 /* applying the configuration */
@@ -84,14 +83,16 @@ get_file_prop(const int client_d, packet_t *prop, struct sockaddr_in *client)
 	ssize_t recv_bytes;
 
 	puts("Receiving file properties...\n");
+
 	memset(prop, 0, sizeof(packet_t));
+
 	recv_bytes = recv(client_d, (packet_t *)prop, sizeof(packet_t), 0);
 	if (recv_bytes < 0) {
 		perror("recv");
 		goto err;
 	}
 
-	if (file_verif(prop) < 0) {
+	if (file_verif(prop) < 0) {	/* see: ftransfer.c */
 		fputs("Invalid file name! :p\n\n", stderr);
 		goto err;
 	}
@@ -105,17 +106,6 @@ get_file_prop(const int client_d, packet_t *prop, struct sockaddr_in *client)
 
 err:
 	return -errno;
-}
-
-static int
-file_verif(const packet_t *prop)
-{
-	if (prop->file_name_len== 0 || strstr(prop->file_name, "..") != NULL) {
-		errno = EINVAL;
-		return -errno;
-	}
-
-	return 0;
 }
 
 static void

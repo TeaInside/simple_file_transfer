@@ -18,11 +18,12 @@ typedef struct __attribute__((packed)) packet_t {
 } packet_t;
 
 
-int  set_sigaction(struct sigaction *act, void (*func)(int));
-int  init_socket(struct sockaddr_in *sock, const char *addr,
+int  set_sigaction (struct sigaction *act, void (*func)(int));
+int  init_socket   (struct sockaddr_in *sock, const char *addr,
 			const uint16_t port);
-int  run_client(int argc, char *argv[]);
-int  run_server(int argc, char *argv[]);
-void print_help(FILE *f);
+int  file_verif    (const packet_t *prop);
+int  run_client    (int argc, char *argv[]);
+int  run_server    (int argc, char *argv[]);
+void print_help    (FILE *f);
 
 #endif

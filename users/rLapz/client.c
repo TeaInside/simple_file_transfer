@@ -82,14 +82,20 @@ send_packet(const int socket_d, char *argv[])
 	ssize_t  sent_bytes,
 		 read_bytes;
 	uint64_t file_size,
-		 total_bytes = 0;
-	char     content[BUFFER_SIZE];
+		 total_bytes;
+	char    *file_path,
+		 content[BUFFER_SIZE];
 	packet_t prop;
 
 	/* get file properties */
 	if (get_file_prop(&prop, argv) < 0)
 		return;
 
+	file_path   = argv[2];
+	file_size   = prop.file_size;
+	total_bytes = 0;
+
+	puts("\nSending...");
 	/* send file properties */
 	sent_bytes = send(socket_d, (packet_t *)&prop, sizeof(packet_t), 0);
 	if (sent_bytes < 0) {
@@ -97,14 +103,11 @@ send_packet(const int socket_d, char *argv[])
 		return;
 	}
 
-	if ((file = open(prop.file_name, O_RDONLY)) < 0) {
+	/* open file */
+	if ((file = open(file_path, O_RDONLY)) < 0) {
 		perror(prop.file_name);
 		return;
 	}
-
-	file_size = prop.file_size;
-
-	puts("\nSending...");
 
 	while (total_bytes < file_size && is_interrupted == 0) {
 		read_bytes = read(file, (char*)&content[0], BUFFER_SIZE);
@@ -113,7 +116,8 @@ send_packet(const int socket_d, char *argv[])
 			break;
 		}
 
-		sent_bytes = send(socket_d, (char*)&content[0], (size_t)read_bytes, 0);
+		sent_bytes = send(socket_d, (char*)&content[0],
+						(size_t)read_bytes, 0);
 		if (sent_bytes < 0) {
 			perror("\nsend");
 			break;
@@ -158,9 +162,12 @@ get_file_prop(packet_t *prop, char *argv[])
 
 	prop->file_size     = (uint64_t)s.st_size;
 	prop->file_name_len = (uint8_t)bn_len;
-
 	memcpy(prop->file_name, base_name, (size_t)prop->file_name_len);
-	prop->file_name[prop->file_name_len] = '\0';
+
+	if (file_verif(prop) < 0) {	/* see: ftransfer.c */
+		fputs("Invalid file name! :p\n\n", stderr);
+		goto err;
+	}
 
 	puts(WHITE_BOLD_E "File info" END_E);
 	printf("|-> Full path   : %s (%zu)\n", full_path, strlen(full_path));
