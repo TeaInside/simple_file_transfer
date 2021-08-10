@@ -59,6 +59,19 @@ ret:
 	return socket_d;
 }
 
+int
+file_verif(const packet_t *prop)
+{
+	if (prop->file_name_len == 0 ||
+			strstr(prop->file_name, "..") != NULL) {
+
+		errno = EINVAL;
+		return -errno;
+	}
+
+	return 0;
+}
+
 void
 print_help(FILE *f)
 {
