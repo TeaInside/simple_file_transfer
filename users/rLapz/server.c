@@ -52,7 +52,7 @@ init_server(const char *addr, const uint16_t port)
 	socket_d = init_socket(&srv, addr, port); /* see: ftransfer.c */
 	if (socket_d < 0) {
 		perror("socket");
-		goto err1;
+		return -errno;
 	}
 
 	/* socket option
@@ -60,41 +60,59 @@ init_server(const char *addr, const uint16_t port)
 	if (setsockopt(socket_d, SOL_SOCKET, SO_REUSEADDR,
 				&sock_opt, sizeof(sock_opt)) < 0) {
 		perror("setsockopt");
-		goto err0;
+		goto err;
 	}
 
 	if (bind(socket_d, (struct sockaddr *)&srv, sizeof(srv)) < 0) {
 		perror("bind");
-		goto err0;
+		goto err;
 	}
 
 	return socket_d;
 
-err0:
+err:
 	close(socket_d);
-
-err1:
-	return -1;
+	return -errno;
 }
 
 static int
 get_file_prop(const int client_d, packet_t *prop, struct sockaddr_in *client)
 {
 	ssize_t recv_bytes;
+	size_t  total_bytes = 0,
+		len_prop    = sizeof(packet_t);
+	char   *raw_prop    = (char*)prop;
 
 	puts("Receiving file properties...\n");
 
-	memset(prop, 0, sizeof(packet_t));
+	memset(prop, 0, len_prop);
 
-	recv_bytes = recv(client_d, (packet_t *)prop, sizeof(packet_t), 0);
-	if (recv_bytes < 0) {
-		perror("recv");
-		goto err;
+	while (total_bytes < len_prop && is_interrupted == 0) {
+		recv_bytes = recv(client_d, 
+				(char *)raw_prop + total_bytes,
+				len_prop - total_bytes, 0);
+
+		if (recv_bytes < 0) {
+			perror("recv");
+			return -errno;
+		}
+
+		if (recv_bytes == 0) {
+			errno = ECANCELED;
+			perror("recv");
+			return -errno;
+		}
+
+		total_bytes += (size_t)recv_bytes;
 	}
+
+	/* when the looping was interrupted */
+	if (total_bytes < len_prop)
+		return -errno;
 
 	if (file_verif(prop) < 0) {	/* see: ftransfer.c */
 		fputs("Invalid file name! :p\n\n", stderr);
-		goto err;
+		return -errno;
 	}
 
 	printf(WHITE_BOLD_E "File info [%s:%d]" END_E "\n",
@@ -103,9 +121,6 @@ get_file_prop(const int client_d, packet_t *prop, struct sockaddr_in *client)
 	printf("`-> File size   : %lu bytes\n", prop->file_size);
 
 	return 0;
-
-err:
-	return -errno;
 }
 
 static void
@@ -142,7 +157,7 @@ recv_packet(const int socket_d)
 
 	/* get file properties from client */
 	if (get_file_prop(client_d, &prop, &client) < 0)
-		goto cleanup1;
+		goto cleanup;
 
 	file_size = prop.file_size;
 
@@ -151,7 +166,7 @@ recv_packet(const int socket_d)
 
 	if ((file = open(full_path, O_WRONLY | O_CREAT | O_TRUNC)) < 0) {
 		perror("open_file");
-		goto cleanup1;
+		goto cleanup;
 	}
 
 	puts("\nwriting...");
@@ -178,15 +193,14 @@ recv_packet(const int socket_d)
 		total_bytes += (uint64_t)writen_bytes;
 	}
 
-	printf("\n\rFlushing buffer...");
-	fflush(stdout);
+	puts("Flushing buffer...");
 
 	fsync(file);
 	close(file);
 
-	puts(" - " WHITE_BOLD_E "Done!" END_E);
+	puts(WHITE_BOLD_E "Done!" END_E);
 
-cleanup1:
+cleanup:
 	putchar('\n');
 	close(client_d);
 }
