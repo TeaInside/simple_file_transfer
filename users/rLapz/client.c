@@ -4,7 +4,9 @@
  *
  * Copyright (C) 2021  Arthur Lapz <rlapz@gnuweeb.org>
  *
- * NOTE: true = 1, false = 0
+ * NOTE: 
+ *       true    : 1,   false  : 0    [ boolean      ]
+ *       success : >=0, failed : <0   [ return value ]
  */
 
 #include <errno.h>
@@ -22,162 +24,152 @@
 
 #include "ftransfer.h"
 
-/* function declarations */
-static void  interrupt_handler (int sig);
-static int   init_client       (const char *addr, const uint16_t port);
-static int   send_packet       (const int socket_d, char *argv[]);
-static int   get_file_prop     (packet_t *prop, char *argv[]);
 
-/* applying the configuration */
-#include "config.h"
+/* function declarations */
+static int init_client(const char *addr, const uint16_t port);
+static int set_file_prop(packet_t *prop, char *argv[]);
+static int send_file_prop(const int sock_d, packet_t *prop);
+static int send_file(const int sock_d, char *argv[]);
+
 
 /* global variables */
-static volatile int is_interrupted = 0;
+extern int is_interrupted;
 
 
 /* function implementations */
-static void
-interrupt_handler(int sig)
-{
-	is_interrupted = 1;
-	errno          = EINTR;
-
-	(void)sig;
-}
-
 static int
 init_client(const char *addr, const uint16_t port)
 {
-	int socket_d;
+	int sock_d;
 	struct sockaddr_in sock;
 
-	socket_d = init_socket(&sock, addr, port); /* see: ftransfer.c */
-	if (socket_d < 0) {
-		perror("\nsocket:");
+	if ((sock_d = init_tcp(&sock, addr, port)) < 0) { /* see: ftransfer.c */
+		perror("init_client(): socket");
 		return -errno;
 	}
 
-	printf("\nConnecting...");
-	fflush(stdout);
+	puts("Connecting...");
 
-	if (connect(socket_d, (struct sockaddr *)&sock, sizeof(sock)) < 0) {
-		perror("\nconnect");
+	if (connect(sock_d, (struct sockaddr *)&sock, sizeof(sock)) < 0) {
+		perror("init_client(): connect");
 		goto err;
 	}
 
-	puts("\rConnected to the server!\n");
-	return socket_d;
+	puts("Connected to the server\n");
+	return sock_d;
 
 err:
-	close(socket_d);
-
-	puts("\r");
+	close(sock_d);
 	return -errno;
 }
 
 static int
-send_packet(const int socket_d, char *argv[])
+set_file_prop(packet_t *prop, char *argv[])
 {
-	int      file;
-	ssize_t  sent_bytes,
-		 read_bytes;
-	uint64_t file_size,
-		 total_bytes;
-	char    *file_path,
-		 content[BUFFER_SIZE];
-	packet_t prop;
+	char *full_path = argv[2];
+	char *base_name;
+	struct stat st;
 
-	/* get file properties */
-	if (get_file_prop(&prop, argv) < 0)
-		return -errno;
+	if (stat(full_path, &st) < 0)
+		goto err;
 
-	file_path   = argv[2];
-	file_size   = prop.file_size;
-	total_bytes = 0;
-
-	puts("\nSending...");
-	/* send file properties */
-	sent_bytes = send(socket_d, (packet_t *)&prop, sizeof(packet_t), 0);
-	if (sent_bytes < 0) {
-		perror("send");
-		return -errno;
-	}
-
-	/* open file */
-	if ((file = open(file_path, O_RDONLY)) < 0) {
-		perror(file_path);
-		return -errno;
-	}
-
-	while (total_bytes < file_size && is_interrupted == 0) {
-		read_bytes = read(file, (char*)&content[0], BUFFER_SIZE);
-		if (read_bytes < 0) {
-			perror("\nread");
-			break;
-		}
-
-		sent_bytes = send(socket_d, (char*)&content[0],
-						(size_t)read_bytes, 0);
-		if (sent_bytes < 0) {
-			perror("\nsend");
-			break;
-		}
-
-		total_bytes += (uint64_t)sent_bytes;
-	}
-
-	close(file);
-
-	puts(WHITE_BOLD_E "Done!" END_E);
-
-	return (errno != 0 ? -errno : 0);
-}
-
-static int
-get_file_prop(packet_t *prop, char *argv[])
-{
-	const char *base_name;
-	char       *full_path;
-	struct      stat s;
-	size_t      bn_len;
-
-	if (stat(argv[2], &s) < 0) {
-		perror(argv[2]);
-		return -errno;
-	}
-
-	if (S_ISDIR(s.st_mode)) {
+	if (S_ISDIR(st.st_mode)) {
 		errno = EISDIR;
-		perror(argv[2]);
-		return -errno;
+		goto err;
 	}
-
-	full_path = argv[2];
-	base_name = basename(full_path);
-	bn_len	  = strlen(base_name);
 
 	memset(prop, 0, sizeof(packet_t));
-
-	prop->file_size     = (uint64_t)s.st_size;
-	prop->file_name_len = (uint8_t)bn_len;
+	prop->file_size     = (uint64_t)st.st_size;
+	prop->file_name_len = (uint8_t)strlen((base_name = basename(full_path)));
 	memcpy(prop->file_name, base_name, (size_t)prop->file_name_len);
 
-	if (file_verif(prop) < 0) {	/* see: ftransfer.c */
-		fputs("Invalid file name! :p\n\n", stderr);
-		return -errno;
-	}
+	if (file_check(prop) < 0) /* see: ftransfer.c */
+		goto err;
 
-	puts(WHITE_BOLD_E "File info" END_E);
+	puts(BOLD_WHITE("File properties:"));
 	printf("|-> Full path   : %s (%zu)\n", full_path, strlen(full_path));
 	printf("|-> File name   : %s (%u)\n", prop->file_name, prop->file_name_len);
 	printf("|-> File size   : %" PRIu64 " bytes\n", prop->file_size);
 	printf("`-> Destination : %s:%s\n", argv[0], argv[1]);
 
 	return 0;
+
+err:
+	fprintf(stderr, "\nset_file_prop(): %s: %s\n", argv[2], strerror(errno));
+	return -errno;
 }
 
-int
-run_client(int argc, char *argv[])
+static int
+send_file_prop(const int sock_d, packet_t *prop)
+{
+	char *raw_prop = (char *)prop;
+	size_t t_bytes = 0,
+	       p_size  = sizeof(packet_t);
+	ssize_t s_bytes;
+
+	while (t_bytes < p_size && is_interrupted == 0) {
+		s_bytes = send(sock_d, raw_prop + t_bytes, p_size - t_bytes, 0);
+		if (s_bytes <= 0)
+			break;
+
+		t_bytes += (size_t)s_bytes;
+	}
+
+	if (t_bytes != p_size)
+		return -errno;
+
+	return 0;
+}
+
+static int
+send_file(const int sock_d, char *argv[])
+{
+	FILE    *file_d;
+	ssize_t  s_bytes;
+	size_t   r_bytes;
+	uint64_t b_total = 0;
+	char     buffer[BUFFER_SIZE];
+	packet_t prop;
+
+	if (set_file_prop(&prop, argv) < 0)
+		return -errno;
+
+	/* open file */
+	if ((file_d = fopen(argv[2], "r")) == NULL) {
+		perror("send_file(): open");
+		return -errno;
+	}
+
+	if (send_file_prop(sock_d, &prop) < 0) {
+		perror("send_file(): file_prop_handler");
+		goto cleanup;
+	}
+
+	puts("\nSending...");
+	while (b_total < prop.file_size && is_interrupted == 0) {
+		r_bytes = fread(buffer, 1, sizeof(buffer), file_d);
+
+		if ((s_bytes = send(sock_d, buffer, r_bytes, 0)) < 0)
+			break;
+
+		b_total += (uint64_t)s_bytes;
+
+		if (feof(file_d) != 0 || ferror(file_d) != 0)
+			break;
+	}
+
+cleanup:
+	fclose(file_d);
+
+	if (b_total != prop.file_size) {
+		perror("send_file()");
+		return -errno;
+	}
+
+	return 0;
+}
+
+int run_client(int argc, char *argv[])
 {
 	/*
 	 * argv[0] is the server address
@@ -186,33 +178,32 @@ run_client(int argc, char *argv[])
 	 */
 
 	if (argc != 3) {
-		errno = EINVAL;
-		print_help(stderr);
-		goto err;
+		printf("Error: Invalid argument on run_client\n");
+		print_help();
+		return EINVAL;
 	}
 
-	printf(WHITE_BOLD_E "Client started" END_E "\n");
-	printf(WHITE_BOLD_E "Buffer size: %u" END_E "\n\n", BUFFER_SIZE);
+	int    sock_d;
+	struct sigaction act;
 
-	int	 socket_d;
-	struct   sigaction act;
-
-	if (set_sigaction(&act, interrupt_handler) < 0) /* see: ftransfer.c */
+	if (set_sigaction(&act) < 0) /* see: ftransfer.c */
 		goto err;
 
-	if ((socket_d = init_client(argv[0], (uint16_t)atoi(argv[1]))) < 0)
+	uint16_t port = (uint16_t)strtol(argv[1], NULL, 0);
+	if ((sock_d = init_client(argv[0], port)) < 0)
 		goto err;
 
-	if (send_packet(socket_d, argv) < 0) {
-		close(socket_d);
-		goto err;
-	}
+	int ret = send_file(sock_d, argv);
+	close(sock_d);
 
-	puts("\nuWu :3");
-	return 0;
+	if (ret < 0)
+		goto err;
+
+	puts(BOLD_WHITE("Done!"));
+
+	return EXIT_SUCCESS;
 
 err:
-	fputs("\nFailed! :(\n", stderr);
-	return -errno;
+	fputs("\nFailed!\n", stderr);
+	return EXIT_FAILURE;
 }
-

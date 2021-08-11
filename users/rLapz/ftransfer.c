@@ -7,45 +7,52 @@
 
 #include <errno.h>
 #include <signal.h>
-#include <stdio.h>
 #include <string.h>
+#include <stdio.h>
+#include <unistd.h>
 
 #include <arpa/inet.h>
 
 #include "ftransfer.h"
 
-/* global variables */
 static const char *app = NULL;
 
+int is_interrupted = 0;
 
-int
-set_sigaction(struct sigaction *act, void (*func)(int))
+void
+interrupt_handler(int sig)
 {
-	memset(act, 0, sizeof(struct sigaction));
+	is_interrupted = 1;
+	errno = EINTR;
 
-	act->sa_handler = func;
-	if (sigaction(SIGINT, act, NULL) < 0)
-		goto err;
-	if (sigaction(SIGTERM, act, NULL) < 0)
-		goto err;
-	if (sigaction(SIGHUP, act, NULL) < 0)
-		goto err;
-
-	act->sa_handler = SIG_IGN;
-	if (sigaction(SIGPIPE, act, NULL) < 0)
-		goto err;
-
-	return 0;
-
-err:
-	return -1;
+	(void)sig;
 }
 
 int
-init_socket(struct sockaddr_in *sock, const char *addr, const uint16_t port)
+set_sigaction(struct sigaction *act)
 {
-	int socket_d = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-	if (socket_d < 0)
+	memset(act, 0, sizeof(struct sigaction));
+
+	act->sa_handler = interrupt_handler;
+	if (sigaction(SIGINT, act, NULL) < 0)
+		return -1;
+	if (sigaction(SIGTERM, act, NULL) < 0)
+		return -1;
+	if (sigaction(SIGHUP, act, NULL) < 0)
+		return -1;
+
+	act->sa_handler = SIG_IGN;
+	if (sigaction(SIGPIPE, act, NULL) < 0)
+		return -1;
+
+	return 0;
+}
+
+int
+init_tcp(struct sockaddr_in *sock, const char *addr, const uint16_t port)
+{
+	int sock_d = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+	if (sock_d < 0)
 		goto ret;
 
 	memset(sock, 0, sizeof(struct sockaddr_in));
@@ -56,15 +63,13 @@ init_socket(struct sockaddr_in *sock, const char *addr, const uint16_t port)
 	sock->sin_port        = htons(port);
 
 ret:
-	return socket_d;
+	return sock_d;
 }
 
 int
-file_verif(const packet_t *prop)
+file_check(const packet_t *p)
 {
-	if (prop->file_name_len == 0 ||
-			strstr(prop->file_name, "..") != NULL) {
-
+	if (p->file_name_len == 0 || strstr(p->file_name, "..") != NULL) {
 		errno = EINVAL;
 		return -errno;
 	}
@@ -72,38 +77,30 @@ file_verif(const packet_t *prop)
 	return 0;
 }
 
-void
-print_help(FILE *f)
+void print_help(void)
 {
-	if (f == stderr)
-		perror(NULL);
-
-	fprintf(f, "Usage: \n");
-	fprintf(f, "  %s server [bind_addr] [bind_port]\n", app);
-	fprintf(f, "  %s client [server_addr] [server_port] [filename]\n", app);
+	printf("Usage: \n");
+	printf("  %s server [bind_addr] [bind_port]\n", app);
+	printf("  %s client [server_addr] [server_port] [filename]\n", app);
 }
 
 
-int
-main(int argc, char *argv[])
+int main(int argc, char *argv[])
 {
 	app = argv[0];
 
 	if (argc < 2) {
-		print_help(stdout);
+		print_help();
 		return 0;
 	}
 
 	argc -= 2;
-	if (strcmp("server", argv[1]) == 0)
+	if (!strcmp("server", argv[1]))
 		return run_server(argc, argv + 2);
-
-	else if (strcmp("client", argv[1]) == 0)
+	else if (!strcmp("client", argv[1]))
 		return run_client(argc, argv + 2);
 
-	errno = EINVAL;
-	print_help(stderr);
-
-	return errno;
+	printf("Error: Invalid argument \"%s\"\n\n", argv[1]);
+	print_help();
+	return EINVAL;
 }
-
