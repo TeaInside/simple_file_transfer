@@ -9,6 +9,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <inttypes.h>
 #include <libgen.h>
 #include <signal.h>
 #include <stdio.h>
@@ -169,7 +170,7 @@ get_file_prop(packet_t *prop, char *argv[])
 	puts(WHITE_BOLD_E "File info" END_E);
 	printf("|-> Full path   : %s (%zu)\n", full_path, strlen(full_path));
 	printf("|-> File name   : %s (%u)\n", prop->file_name, prop->file_name_len);
-	printf("|-> File size   : %lu bytes\n", prop->file_size);
+	printf("|-> File size   : %" PRIu64 " bytes\n", prop->file_size);
 	printf("`-> Destination : %s:%s\n", argv[0], argv[1]);
 
 	return 0;

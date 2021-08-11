@@ -9,6 +9,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <inttypes.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -118,7 +119,7 @@ get_file_prop(const int client_d, packet_t *prop, struct sockaddr_in *client)
 	printf(WHITE_BOLD_E "File info [%s:%d]" END_E "\n",
 			inet_ntoa(client->sin_addr), ntohs(client->sin_port));
 	printf("|-> File name   : %s (%u)\n", prop->file_name, prop->file_name_len);
-	printf("`-> File size   : %lu bytes\n", prop->file_size);
+	printf("`-> File size   : %" PRIu64 " bytes\n", prop->file_size);
 
 	return 0;
 }
