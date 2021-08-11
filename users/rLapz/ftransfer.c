@@ -95,10 +95,10 @@ main(int argc, char *argv[])
 	}
 
 	argc -= 2;
-	if (strncmp("server", argv[1], 6) == 0)
+	if (strcmp("server", argv[1]) == 0)
 		return run_server(argc, argv + 2);
 
-	else if (strncmp("client", argv[1], 6) == 0)
+	else if (strcmp("client", argv[1]) == 0)
 		return run_client(argc, argv + 2);
 
 	errno = EINVAL;
