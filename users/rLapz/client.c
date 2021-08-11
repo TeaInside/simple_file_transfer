@@ -104,7 +104,7 @@ send_packet(const int socket_d, char *argv[])
 	}
 
 	/* open file */
-	if ((file = open(file_path, O_RDONLY)) < 0) {
+	if ((file = open(file_path, O_RDONLY, 0)) < 0) {
 		perror(file_path);
 		return -errno;
 	}

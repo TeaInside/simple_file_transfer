@@ -132,6 +132,7 @@ recv_packet(const int socket_d)
 	ssize_t   recv_bytes,
 		  writen_bytes;
 	packet_t  prop;
+	mode_t    file_mode;
 	struct    sockaddr_in client;
 	uint64_t  file_size,
 		  total_bytes	= 0;
@@ -165,7 +166,8 @@ recv_packet(const int socket_d)
 	/* file handler */
 	snprintf(full_path, sizeof(full_path), "%s/%s", DEST_DIR, prop.file_name);
 
-	if ((file = open(full_path, O_WRONLY | O_CREAT | O_TRUNC)) < 0) {
+	file_mode = S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH;
+	if ((file = open(full_path, O_WRONLY | O_CREAT | O_TRUNC, file_mode)) < 0) {
 		perror("open_file");
 		goto cleanup;
 	}
