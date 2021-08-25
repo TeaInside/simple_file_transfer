@@ -61,17 +61,19 @@ file_prop_handler(const int fd, packet_t *prop, FuncFileHandlerMode m)
 {
 	func_file_hander f;
 	char   *raw_prop = (char *)prop;
-	ssize_t t_bytes  = 0,
+	ssize_t p_bytes;
+	size_t  t_bytes  = 0,
 		p_size   = sizeof(packet_t);
-	size_t  p_bytes;
 
 	switch (m) {
 	case FUNC_SEND:
 		f.send = send;
 		break;
+
 	case FUNC_RECV:
 		f.recv = recv;
 		break;
+
 	default:
 		errno = EINVAL;
 		return -errno;
