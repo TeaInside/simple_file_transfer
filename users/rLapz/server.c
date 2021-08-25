@@ -101,8 +101,6 @@ err:
 static void
 recv_packet(const int sock_d)
 {
-#define RET(X) do { perror("recv_packet(): "X); return; } while (0)
-
 	FILE     *file_d;
 	int       client_d;
 	ssize_t   rv_bytes;
@@ -114,15 +112,21 @@ recv_packet(const int sock_d)
 	char      buffer[BUFFER_SIZE],
 	          full_path[sizeof(DEST_DIR) + sizeof(prop.file_name)];
 
-	if (listen(sock_d, 3) < 0)
-		RET("listening");
+	if (listen(sock_d, 3) < 0) {
+		perror("recv_packet(): listening");
+		return;
+	}
 
-	if (getsockname(sock_d, (struct sockaddr *)&client, &client_len) < 0)
-		RET("getsockname");
+	if (getsockname(sock_d, (struct sockaddr *)&client, &client_len) < 0) {
+		perror("recv_packet(): getsockname");
+		return;
+	}
 
 	client_d = accept(sock_d, (struct sockaddr *)&client, &client_len);
-	if (client_d < 0)
-		RET("accept");
+	if (client_d < 0) {
+		perror("recv_packet(): accept");
+		return;
+	}
 
 	/* get file properties */
 	if (get_file_prop(client_d, &prop, &client) < 0) {
@@ -142,13 +146,13 @@ recv_packet(const int sock_d)
 	while (b_total < prop.file_size && is_interrupted == 0) {
 		rv_bytes = recv(client_d, (char *)&buffer[0], sizeof(buffer), 0);
 		if (rv_bytes <= 0) {
-			perror("recv");
+			perror("recv_packet(): recv");
 			break;
 		}
 
 		w_bytes = fwrite((char *)&buffer[0], 1, (size_t)rv_bytes, file_d);
 		if (errno != 0) {
-			perror("write");
+			perror("recv_packet(): write");
 			break;
 		}
 
@@ -161,7 +165,7 @@ recv_packet(const int sock_d)
 	fclose(file_d);
 
 	if (b_total != prop.file_size) {
-		fprintf(stderr, "File %s corrupted\n", prop.file_name);
+		fprintf(stderr, "File \"%s\" corrupted\n", prop.file_name);
 		goto cleanup;
 	}
 

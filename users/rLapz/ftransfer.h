@@ -23,9 +23,9 @@ typedef union {
 } func_file_hander;
 
 typedef struct __attribute__((packed)) packet_t {
-	uint64_t	file_size;
-	uint8_t		file_name_len;
-	char		file_name[0xffu];
+	uint64_t file_size;
+	uint8_t  file_name_len;
+	char     file_name[0xffu];
 } packet_t;
 
 
@@ -43,3 +43,4 @@ int run_client(int argc, char *argv[]);
 void print_help(void);
 
 #endif
+

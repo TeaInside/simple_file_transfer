@@ -150,12 +150,12 @@ send_file(const int sock_d, char *argv[])
 
 cleanup:
 	fclose(file_d);
+
 	if (b_total != prop.file_size) {
 		perror(NULL);
 		return -errno;
 	}
 
-	puts(BOLD_WHITE("Done!"));
 	return 0;
 }
 
@@ -183,10 +183,13 @@ int run_client(int argc, char *argv[])
 	if ((sock_d = init_client(argv[0], port)) < 0)
 		goto err;
 
-	if (send_file(sock_d, argv) < 0) {
-		close(sock_d);
+	int ret = send_file(sock_d, argv);
+	close(sock_d);
+
+	if (ret < 0)
 		goto err;
-	}
+
+	puts(BOLD_WHITE("Done!"));
 
 	return EXIT_SUCCESS;
 
