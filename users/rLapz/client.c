@@ -123,21 +123,29 @@ send_file(const int sock_d, char *argv[])
 		return -errno;
 
 	/* open file */
-	if ((file_d = open(argv[2], O_RDONLY, 0)) < 0)
+	if ((file_d = open(argv[2], O_RDONLY, 0)) < 0) {
+		perror("send_file(): open");
 		return -errno;
+	}
 
-	if (file_prop_handler(sock_d, &prop, FUNC_SEND) < 0)
+	if (file_prop_handler(sock_d, &prop, FUNC_SEND) < 0) {
+		perror("send_file(): file_prop_handler");
 		goto cleanup;
+	}
 
 	puts("\nSending...");
 	while (b_total < prop.file_size && is_interrupted == 0) {
 		r_bytes = read(file_d, (char *)&file[0], sizeof(file));
-		if (r_bytes <= 0)
+		if (r_bytes <= 0) {
+			perror("read");
 			break;
+		}
 
 		s_bytes = send(sock_d, (char *)&file[0], (size_t)r_bytes, 0);
-		if (s_bytes < 0)
+		if (s_bytes < 0) {
+			perror("send");
 			break;
+		}
 
 		b_total += (uint64_t)s_bytes;
 	}
@@ -175,8 +183,10 @@ int run_client(int argc, char *argv[])
 	if ((sock_d = init_client(argv[0], port)) < 0)
 		goto err;
 
-	if (send_file(sock_d, argv) < 0)
+	if (send_file(sock_d, argv) < 0) {
+		close(sock_d);
 		goto err;
+	}
 
 	return EXIT_SUCCESS;
 

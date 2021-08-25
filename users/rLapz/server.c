@@ -126,42 +126,51 @@ recv_packet(const int sock_d)
 		RET("accept");
 
 	/* get file properties */
-	if (get_file_prop(client_d, &prop, &client) < 0)
+	if (get_file_prop(client_d, &prop, &client) < 0) {
+		perror("recv_packet(): get_file_prop");
 		goto cleanup;
+	}
 
 	/* file handler */
 	snprintf(full_path, sizeof(full_path), "%s/%s", DEST_DIR, prop.file_name);
 
 	f_mode = S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH;
-	if ((file_d = open(full_path, O_WRONLY | O_CREAT | O_TRUNC, f_mode)) < 0)
+	if ((file_d = open(full_path, O_WRONLY | O_CREAT | O_TRUNC, f_mode)) < 0) {
+		perror("recv_packet(): open");
 		goto cleanup;
+	}
 
 	puts("\nWriting...");
 	while (b_total < prop.file_size && is_interrupted == 0) {
 		rv_bytes = recv(client_d, (char *)&file[0], sizeof(file), 0);
-		if (rv_bytes <= 0)
+		if (rv_bytes <= 0) {
+			perror("recv");
 			break;
+		}
 
 		w_bytes = write(file_d, (char *)&file[0], (size_t)rv_bytes);
-		if (w_bytes < 0)
+		if (w_bytes < 0) {
+			perror("write");
 			break;
+		}
 
 		b_total += (uint64_t)w_bytes;
 	}
 
-cleanup:
 	fsync(file_d);
 	puts("Buffer flushed");
 
 	close(file_d);
 
 	if (b_total != prop.file_size) {
-		errno = ECANCELED;
-		perror(prop.file_name);
-		return;
+		fprintf(stderr, "File %s corrupted\n", prop.file_name);
+		goto cleanup;
 	}
 
 	puts(BOLD_WHITE("Done!"));
+
+cleanup:
+	close(client_d);
 }
 
 int run_server(int argc, char *argv[])
@@ -195,6 +204,7 @@ int run_server(int argc, char *argv[])
 		recv_packet(sock_d);
 	/* end main loop */
 
+	close(sock_d);
 	puts("Stopped");
 
 	return EXIT_SUCCESS;
