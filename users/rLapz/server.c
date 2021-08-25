@@ -24,27 +24,18 @@
 
 
 /* function declarations */
-static void interrupt_handler(int sig);
 static int init_server(const char *addr, const uint16_t port);
+static int recv_file_prop(const int sock_d, packet_t *prop);
 static int get_file_prop(const int sock_d, packet_t *prop,
 		struct sockaddr_in *client);
 static void recv_packet(const int sock_d);
 
 
 /* global variables */
-static int is_interrupted = 0;
+extern int is_interrupted;
 
 
 /* function implementations */
-static void
-interrupt_handler(int sig)
-{
-	is_interrupted = 1;
-	errno = EINTR;
-
-	(void)sig;
-}
-
 static int
 init_server(const char *addr, const uint16_t port)
 {
@@ -77,11 +68,33 @@ err:
 }
 
 static int
+recv_file_prop(const int sock_d, packet_t *prop)
+{
+	char *raw_prop = (char *)prop;
+	size_t t_bytes = 0,
+	       p_size  = sizeof(packet_t);
+	ssize_t s_bytes;
+
+	while (t_bytes < p_size && is_interrupted == 0) {
+		s_bytes = recv(sock_d, raw_prop + t_bytes, p_size - t_bytes, 0);
+		if (s_bytes <= 0)
+			break;
+
+		t_bytes += (size_t)s_bytes;
+	}
+
+	if (t_bytes != p_size)
+		return -errno;
+
+	return 0;
+}
+
+static int
 get_file_prop(const int sock_d, packet_t *prop, struct sockaddr_in *client)
 {
 	memset(prop, 0, sizeof(packet_t));
 
-	if (file_prop_handler(sock_d, prop, FUNC_RECV) < 0)
+	if (recv_file_prop(sock_d, prop) < 0)
 		goto err;
 
 	if (file_check(prop) < 0)
@@ -104,7 +117,6 @@ recv_packet(const int sock_d)
 	FILE     *file_d;
 	int       client_d;
 	ssize_t   rv_bytes;
-	size_t    w_bytes;
 	packet_t  prop;
 	struct    sockaddr_in client;
 	uint64_t  b_total = 0;
@@ -144,19 +156,18 @@ recv_packet(const int sock_d)
 
 	puts("\nWriting...");
 	while (b_total < prop.file_size && is_interrupted == 0) {
-		rv_bytes = recv(client_d, (char *)&buffer[0], sizeof(buffer), 0);
-		if (rv_bytes <= 0) {
-			perror("recv_packet(): recv");
+		rv_bytes = recv(client_d, buffer, sizeof(buffer), 0);
+		if (rv_bytes < 0)
+			break;
+		if (rv_bytes == 0) {
+			errno = ECANCELED;
 			break;
 		}
 
-		w_bytes = fwrite((char *)&buffer[0], 1, (size_t)rv_bytes, file_d);
-		if (errno != 0) {
-			perror("recv_packet(): write");
-			break;
-		}
+		b_total += (uint64_t)fwrite(buffer, 1, (size_t)rv_bytes, file_d);
 
-		b_total += (uint64_t)w_bytes;
+		if (ferror(file_d) != 0)
+			break;
 	}
 
 	fflush(file_d);
@@ -164,8 +175,13 @@ recv_packet(const int sock_d)
 
 	fclose(file_d);
 
+	if (errno != 0) {
+		perror("recv_packet()");
+		goto cleanup;
+	}
+
 	if (b_total != prop.file_size) {
-		fprintf(stderr, "File \"%s\" corrupted\n", prop.file_name);
+		fprintf(stderr, "File \"%s\" is corrupted\n", prop.file_name);
 		goto cleanup;
 	}
 
@@ -194,7 +210,7 @@ int run_server(int argc, char *argv[])
 	int    sock_d;
 	struct sigaction act;
 
-	if (set_sigaction(&act, interrupt_handler) < 0) /* see: ftransfer.c */
+	if (set_sigaction(&act) < 0) /* see: ftransfer.c */
 		goto err;
 
 	uint16_t port = (uint16_t)strtol(argv[1], NULL, 0);
@@ -202,8 +218,10 @@ int run_server(int argc, char *argv[])
 		goto err;
 
 	/* main loop */
-	while (is_interrupted == 0)
+	while (is_interrupted == 0) {
+		errno = 0;
 		recv_packet(sock_d);
+	}
 	/* end main loop */
 
 	close(sock_d);

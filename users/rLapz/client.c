@@ -26,26 +26,17 @@
 
 
 /* function declarations */
-static void interrupt_handler(int sig);
 static int init_client(const char *addr, const uint16_t port);
 static int set_file_prop(packet_t *prop, char *argv[]);
+static int send_file_prop(const int sock_d, packet_t *prop);
 static int send_file(const int sock_d, char *argv[]);
 
 
 /* global variables */
-static int is_interrupted = 0;
+extern int is_interrupted;
 
 
 /* function implementations */
-static void
-interrupt_handler(int sig)
-{
-	is_interrupted = 1;
-	errno = EINTR;
-
-	(void)sig;
-}
-
 static int
 init_client(const char *addr, const uint16_t port)
 {
@@ -108,6 +99,27 @@ err:
 	return -errno;
 }
 
+static int
+send_file_prop(const int sock_d, packet_t *prop)
+{
+	char *raw_prop = (char *)prop;
+	size_t t_bytes = 0,
+	       p_size  = sizeof(packet_t);
+	ssize_t s_bytes;
+
+	while (t_bytes < p_size && is_interrupted == 0) {
+		s_bytes = send(sock_d, raw_prop + t_bytes, p_size - t_bytes, 0);
+		if (s_bytes <= 0)
+			break;
+
+		t_bytes += (size_t)s_bytes;
+	}
+
+	if (t_bytes != p_size)
+		return -errno;
+
+	return 0;
+}
 
 static int
 send_file(const int sock_d, char *argv[])
@@ -128,31 +140,29 @@ send_file(const int sock_d, char *argv[])
 		return -errno;
 	}
 
-	if (file_prop_handler(sock_d, &prop, FUNC_SEND) < 0) {
+	if (send_file_prop(sock_d, &prop) < 0) {
 		perror("send_file(): file_prop_handler");
 		goto cleanup;
 	}
 
 	puts("\nSending...");
 	while (b_total < prop.file_size && is_interrupted == 0) {
-		r_bytes = fread((char *)&buffer[0], 1, sizeof(buffer), file_d);
-		if (errno != 0)
-			break;
+		r_bytes = fread(buffer, 1, sizeof(buffer), file_d);
 
-		s_bytes = send(sock_d, (char *)&buffer[0], r_bytes, 0);
-		if (s_bytes < 0) {
-			perror("send");
+		if ((s_bytes = send(sock_d, buffer, r_bytes, 0)) < 0)
 			break;
-		}
 
 		b_total += (uint64_t)s_bytes;
+
+		if (feof(file_d) != 0 || ferror(file_d) != 0)
+			break;
 	}
 
 cleanup:
 	fclose(file_d);
 
 	if (b_total != prop.file_size) {
-		perror(NULL);
+		perror("send_file()");
 		return -errno;
 	}
 
@@ -176,7 +186,7 @@ int run_client(int argc, char *argv[])
 	int    sock_d;
 	struct sigaction act;
 
-	if (set_sigaction(&act, interrupt_handler) < 0) /* see: ftransfer.c */
+	if (set_sigaction(&act) < 0) /* see: ftransfer.c */
 		goto err;
 
 	uint16_t port = (uint16_t)strtol(argv[1], NULL, 0);

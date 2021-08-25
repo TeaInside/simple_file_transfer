@@ -17,13 +17,23 @@
 
 static const char *app = NULL;
 
+int is_interrupted = 0;
+
+void
+interrupt_handler(int sig)
+{
+	is_interrupted = 1;
+	errno = EINTR;
+
+	(void)sig;
+}
 
 int
-set_sigaction(struct sigaction *act, void (*func)(int))
+set_sigaction(struct sigaction *act)
 {
 	memset(act, 0, sizeof(struct sigaction));
 
-	act->sa_handler = func;
+	act->sa_handler = interrupt_handler;
 	if (sigaction(SIGINT, act, NULL) < 0)
 		return -1;
 	if (sigaction(SIGTERM, act, NULL) < 0)
@@ -54,45 +64,6 @@ init_tcp(struct sockaddr_in *sock, const char *addr, const uint16_t port)
 
 ret:
 	return sock_d;
-}
-
-int
-file_prop_handler(const int fd, packet_t *prop, FuncFileHandlerMode m)
-{
-	func_file_hander f;
-	char   *raw_prop = (char *)prop;
-	size_t  t_bytes  = 0,
-		p_size   = sizeof(packet_t);
-	ssize_t p_bytes;
-
-	switch (m) {
-	case FUNC_SEND:
-		f.send = send;
-		break;
-
-	case FUNC_RECV:
-		f.recv = recv;
-		break;
-
-	default:
-		errno = EINVAL;
-		return -errno;
-	}
-
-	while (t_bytes < p_size) {
-		p_bytes = f.func(fd, (char *)raw_prop + t_bytes,
-					p_size - t_bytes, 0);
-
-		if (p_bytes <= 0)
-			break;
-
-		t_bytes += (size_t)p_bytes;
-	}
-
-	if (t_bytes != sizeof(packet_t))
-		return -errno;
-
-	return 0;
 }
 
 int
