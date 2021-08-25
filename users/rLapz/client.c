@@ -112,18 +112,18 @@ err:
 static int
 send_file(const int sock_d, char *argv[])
 {
-	int file_d;
-	ssize_t  s_bytes,
-		 r_bytes;
+	FILE    *file_d;
+	ssize_t  s_bytes;
+	size_t   r_bytes;
 	uint64_t b_total = 0;
-	char     file[BUFFER_SIZE];
+	char     buffer[BUFFER_SIZE];
 	packet_t prop;
 
 	if (set_file_prop(&prop, argv) < 0)
 		return -errno;
 
 	/* open file */
-	if ((file_d = open(argv[2], O_RDONLY, 0)) < 0) {
+	if ((file_d = fopen(argv[2], "r")) == NULL) {
 		perror("send_file(): open");
 		return -errno;
 	}
@@ -135,13 +135,11 @@ send_file(const int sock_d, char *argv[])
 
 	puts("\nSending...");
 	while (b_total < prop.file_size && is_interrupted == 0) {
-		r_bytes = read(file_d, (char *)&file[0], sizeof(file));
-		if (r_bytes <= 0) {
-			perror("read");
+		r_bytes = fread((char *)&buffer[0], 1, sizeof(buffer), file_d);
+		if (errno != 0)
 			break;
-		}
 
-		s_bytes = send(sock_d, (char *)&file[0], (size_t)r_bytes, 0);
+		s_bytes = send(sock_d, (char *)&buffer[0], r_bytes, 0);
 		if (s_bytes < 0) {
 			perror("send");
 			break;
@@ -151,9 +149,11 @@ send_file(const int sock_d, char *argv[])
 	}
 
 cleanup:
-	close(file_d);
-	if (b_total != prop.file_size)
+	fclose(file_d);
+	if (b_total != prop.file_size) {
+		perror(NULL);
 		return -errno;
+	}
 
 	puts(BOLD_WHITE("Done!"));
 	return 0;

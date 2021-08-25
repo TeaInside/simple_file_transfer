@@ -103,16 +103,15 @@ recv_packet(const int sock_d)
 {
 #define RET(X) do { perror("recv_packet(): "X); return; } while (0)
 
-	int       file_d = 0,
-	          client_d;
-	ssize_t   rv_bytes,
-		  w_bytes;
+	FILE     *file_d;
+	int       client_d;
+	ssize_t   rv_bytes;
+	size_t    w_bytes;
 	packet_t  prop;
-	mode_t    f_mode;
 	struct    sockaddr_in client;
 	uint64_t  b_total = 0;
 	socklen_t client_len = sizeof(struct sockaddr_in);
-	char      file[BUFFER_SIZE],
+	char      buffer[BUFFER_SIZE],
 	          full_path[sizeof(DEST_DIR) + sizeof(prop.file_name)];
 
 	if (listen(sock_d, 3) < 0)
@@ -134,22 +133,21 @@ recv_packet(const int sock_d)
 	/* file handler */
 	snprintf(full_path, sizeof(full_path), "%s/%s", DEST_DIR, prop.file_name);
 
-	f_mode = S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH;
-	if ((file_d = open(full_path, O_WRONLY | O_CREAT | O_TRUNC, f_mode)) < 0) {
-		perror("recv_packet(): open");
+	if ((file_d = fopen(full_path, "w")) == NULL) {
+		perror("recv_packet(): fopen");
 		goto cleanup;
 	}
 
 	puts("\nWriting...");
 	while (b_total < prop.file_size && is_interrupted == 0) {
-		rv_bytes = recv(client_d, (char *)&file[0], sizeof(file), 0);
+		rv_bytes = recv(client_d, (char *)&buffer[0], sizeof(buffer), 0);
 		if (rv_bytes <= 0) {
 			perror("recv");
 			break;
 		}
 
-		w_bytes = write(file_d, (char *)&file[0], (size_t)rv_bytes);
-		if (w_bytes < 0) {
+		w_bytes = fwrite((char *)&buffer[0], 1, (size_t)rv_bytes, file_d);
+		if (errno != 0) {
 			perror("write");
 			break;
 		}
@@ -157,10 +155,10 @@ recv_packet(const int sock_d)
 		b_total += (uint64_t)w_bytes;
 	}
 
-	fsync(file_d);
+	fflush(file_d);
 	puts("Buffer flushed");
 
-	close(file_d);
+	fclose(file_d);
 
 	if (b_total != prop.file_size) {
 		fprintf(stderr, "File %s corrupted\n", prop.file_name);
