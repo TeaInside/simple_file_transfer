@@ -61,9 +61,9 @@ file_prop_handler(const int fd, packet_t *prop, FuncFileHandlerMode m)
 {
 	func_file_hander f;
 	char   *raw_prop = (char *)prop;
-	ssize_t p_bytes;
 	size_t  t_bytes  = 0,
 		p_size   = sizeof(packet_t);
+	ssize_t p_bytes;
 
 	switch (m) {
 	case FUNC_SEND:
