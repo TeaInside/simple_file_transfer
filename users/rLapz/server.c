@@ -4,7 +4,9 @@
  *
  * Copyright (C) 2021  Arthur Lapz <rlapz@gnuweeb.org>
  *
- * NOTE: true = 1, false = 0
+ * NOTE: 
+ *       true    : 1,   false  : 0    [ boolean      ]
+ *       success : >=0, failed : <0   [ return value ]
  */
 
 #include <errno.h>
@@ -20,25 +22,25 @@
 
 #include "ftransfer.h"
 
-/* function declarations */
-static void  interrupt_handler (int sig);
-static int   init_server       (const char *addr, const uint16_t port);
-static int   get_file_prop     (const int socket_d, packet_t *prop,
-					struct sockaddr_in *client);
-static void  recv_packet       (const int socket_d);
 
-/* applying the configuration */
-#include "config.h"
+/* function declarations */
+static void interrupt_handler(int sig);
+static int init_server(const char *addr, const uint16_t port);
+static int get_file_prop(const int sock_d, packet_t *prop,
+		struct sockaddr_in *client);
+static void recv_packet(const int sock_d);
+
 
 /* global variables */
-static volatile int is_interrupted = 0;
+static int is_interrupted = 0;
+
 
 /* function implementations */
 static void
 interrupt_handler(int sig)
 {
 	is_interrupted = 1;
-	errno          = EINTR;
+	errno = EINTR;
 
 	(void)sig;
 }
@@ -46,170 +48,123 @@ interrupt_handler(int sig)
 static int
 init_server(const char *addr, const uint16_t port)
 {
-	int    sock_opt = 1,
-	       socket_d;
+	int sock_opt = 1,
+	    sock_d;
 	struct sockaddr_in srv;
 
-	socket_d = init_socket(&srv, addr, port); /* see: ftransfer.c */
-	if (socket_d < 0) {
-		perror("socket");
+	if ((sock_d = init_tcp(&srv, addr, port)) < 0) { /* see: ftransfer.c */
+		perror("init_server(): socket");
 		return -errno;
 	}
 
-	/* socket option
-	 * reuse IP address */
-	if (setsockopt(socket_d, SOL_SOCKET, SO_REUSEADDR,
+	/* reuse IP address */
+	if (setsockopt(sock_d, SOL_SOCKET, SO_REUSEADDR,
 				&sock_opt, sizeof(sock_opt)) < 0) {
-		perror("setsockopt");
+		perror("init_server(): setsockopt");
 		goto err;
 	}
 
-	if (bind(socket_d, (struct sockaddr *)&srv, sizeof(srv)) < 0) {
-		perror("bind");
+	if (bind(sock_d, (struct sockaddr *)&srv, sizeof(srv)) < 0) {
+		perror("init_server(): bind");
 		goto err;
 	}
 
-	return socket_d;
+	return sock_d;
 
 err:
-	close(socket_d);
+	close(sock_d);
 	return -errno;
 }
 
 static int
-get_file_prop(const int client_d, packet_t *prop, struct sockaddr_in *client)
+get_file_prop(const int sock_d, packet_t *prop, struct sockaddr_in *client)
 {
-	ssize_t recv_bytes;
-	size_t  total_bytes = 0,
-		len_prop    = sizeof(packet_t);
-	char   *raw_prop    = (char*)prop;
+	memset(prop, 0, sizeof(packet_t));
 
-	puts("Receiving file properties...\n");
+	if (file_prop_handler(sock_d, prop, FUNC_RECV) < 0)
+		goto err;
 
-	memset(prop, 0, len_prop);
+	if (file_check(prop) < 0)
+		goto err;
 
-	while (total_bytes < len_prop && is_interrupted == 0) {
-		recv_bytes = recv(client_d, 
-				(char *)raw_prop + total_bytes,
-				len_prop - total_bytes, 0);
-
-		if (recv_bytes < 0) {
-			perror("recv");
-			return -errno;
-		}
-
-		if (recv_bytes == 0) {
-			errno = ECANCELED;
-			perror("recv");
-			return -errno;
-		}
-
-		total_bytes += (size_t)recv_bytes;
-	}
-
-	/* when the looping was interrupted */
-	if (total_bytes < len_prop)
-		return -errno;
-
-	if (file_verif(prop) < 0) {	/* see: ftransfer.c */
-		fputs("Invalid file name! :p\n\n", stderr);
-		return -errno;
-	}
-
-	printf(WHITE_BOLD_E "File info [%s:%d]" END_E "\n",
+	printf(BOLD_WHITE("File properties [%s:%d]") "\n",
 			inet_ntoa(client->sin_addr), ntohs(client->sin_port));
-	printf("|-> File name   : %s (%u)\n", prop->file_name, prop->file_name_len);
-	printf("`-> File size   : %" PRIu64 " bytes\n", prop->file_size);
+	printf("|-> File name : %s (%u)\n", prop->file_name, prop->file_name_len);
+	printf("`-> File size : %" PRIu64 " bytes\n", prop->file_size);
 
 	return 0;
+
+err:
+	return -errno;
 }
 
 static void
-recv_packet(const int socket_d)
+recv_packet(const int sock_d)
 {
-	int       file,
-		  client_d;
-	ssize_t   recv_bytes,
-		  writen_bytes;
+#define RET(X) do { perror("recv_packet(): "X); return; } while (0)
+
+	int       file_d = 0,
+	          client_d;
+	ssize_t   rv_bytes,
+		  w_bytes;
 	packet_t  prop;
-	mode_t    file_mode;
+	mode_t    f_mode;
 	struct    sockaddr_in client;
-	uint64_t  file_size,
-		  total_bytes	= 0;
-	socklen_t client_len	= sizeof(struct sockaddr_in);
-	char      content[BUFFER_SIZE],
-		  full_path[sizeof(DEST_DIR) + sizeof(prop.file_name)];
-	
-	if (listen(socket_d, 3) < 0) {
-		perror("listening");
-		return;
-	}
+	uint64_t  b_total = 0;
+	socklen_t client_len = sizeof(struct sockaddr_in);
+	char      file[BUFFER_SIZE],
+	          full_path[sizeof(DEST_DIR) + sizeof(prop.file_name)];
 
-	if (getsockname(socket_d, (struct sockaddr *)&client, &client_len) < 0) {
-		perror("getsockname");
-		return;
-	}
+	if (listen(sock_d, 3) < 0)
+		RET("listening");
 
-	/* accept client connection */
-	client_d = accept(socket_d, (struct sockaddr *)&client, &client_len);
-	if (client_d < 0) {
-		perror("accept");
-		return;
-	}
+	if (getsockname(sock_d, (struct sockaddr *)&client, &client_len) < 0)
+		RET("getsockname");
 
-	/* get file properties from client */
+	client_d = accept(sock_d, (struct sockaddr *)&client, &client_len);
+	if (client_d < 0)
+		RET("accept");
+
+	/* get file properties */
 	if (get_file_prop(client_d, &prop, &client) < 0)
 		goto cleanup;
-
-	file_size = prop.file_size;
 
 	/* file handler */
 	snprintf(full_path, sizeof(full_path), "%s/%s", DEST_DIR, prop.file_name);
 
-	file_mode = S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH;
-	if ((file = open(full_path, O_WRONLY | O_CREAT | O_TRUNC, file_mode)) < 0) {
-		perror("open_file");
+	f_mode = S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH;
+	if ((file_d = open(full_path, O_WRONLY | O_CREAT | O_TRUNC, f_mode)) < 0)
 		goto cleanup;
+
+	puts("\nWriting...");
+	while (b_total < prop.file_size && is_interrupted == 0) {
+		rv_bytes = recv(client_d, (char *)&file[0], sizeof(file), 0);
+		if (rv_bytes <= 0)
+			break;
+
+		w_bytes = write(file_d, (char *)&file[0], (size_t)rv_bytes);
+		if (w_bytes < 0)
+			break;
+
+		b_total += (uint64_t)w_bytes;
 	}
-
-	puts("\nwriting...");
-	/* receive & write to disk */
-	while (total_bytes < file_size && is_interrupted == 0) {
-		recv_bytes = recv(client_d, (char *)&content[0], BUFFER_SIZE, 0);
-		if (recv_bytes < 0) {
-			perror("\nrecv");
-			break;
-		}
-
-		if (recv_bytes == 0) {
-			errno = ECANCELED;
-			perror("\nrecv");
-			break;
-		}
-
-		writen_bytes = write(file, (char *)&content[0], (size_t)recv_bytes);
-		if (writen_bytes < 0) {
-			perror("\nfwrite");
-			break;
-		}
-
-		total_bytes += (uint64_t)writen_bytes;
-	}
-
-	puts("Flushing buffer...");
-
-	fsync(file);
-	close(file);
-
-	puts(WHITE_BOLD_E "Done!" END_E);
 
 cleanup:
-	putchar('\n');
-	close(client_d);
+	fsync(file_d);
+	puts("Buffer flushed");
+
+	close(file_d);
+
+	if (b_total != prop.file_size) {
+		errno = ECANCELED;
+		perror(prop.file_name);
+		return;
+	}
+
+	puts(BOLD_WHITE("Done!"));
 }
 
-int
-run_server(int argc, char *argv[])
+int run_server(int argc, char *argv[])
 {
 	/*
 	 * argv[0] is the bind address
@@ -217,35 +172,34 @@ run_server(int argc, char *argv[])
 	 */
 
 	if (argc != 2) {
-		errno = EINVAL;
-		print_help(stderr);
-		return -errno;
+		printf("Error: Invalid argument on run_server\n");
+		print_help();
+		return EINVAL;
 	}
 
-	printf(WHITE_BOLD_E "Server started [%s:%s]" END_E "\n", argv[0], argv[1]);
-	printf(WHITE_BOLD_E "Buffer size: %u" END_E"\n\n", BUFFER_SIZE);
+	printf(BOLD_WHITE("Server started [%s:%s]") "\n", argv[0], argv[1]);
+	printf(BOLD_WHITE("Buffer size: %u") "\n\n", BUFFER_SIZE);
 
-	int	 socket_d;
-	struct   sigaction act;
+	int    sock_d;
+	struct sigaction act;
 
 	if (set_sigaction(&act, interrupt_handler) < 0) /* see: ftransfer.c */
 		goto err;
 
-	if ((socket_d = init_server(argv[0], (uint16_t)atoi(argv[1]))) < 0)
+	uint16_t port = (uint16_t)strtol(argv[1], NULL, 0);
+	if ((sock_d = init_server(argv[0], port)) < 0)
 		goto err;
 
 	/* main loop */
 	while (is_interrupted == 0)
-		recv_packet(socket_d);
+		recv_packet(sock_d);
 	/* end main loop */
 
-	close(socket_d);
-
 	puts("Stopped");
-	return 0;
+
+	return EXIT_SUCCESS;
 
 err:
-	fputs("Failed! :(\n", stderr);
-	return -errno;
+	fputs("\nFailed!\n", stderr);
+	return EXIT_FAILURE;
 }
-
