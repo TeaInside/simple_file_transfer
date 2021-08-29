@@ -8,7 +8,7 @@ CC := cc
 LD := $(CC)
 CFLAGS := -O2 -Wall -Wextra -fpie -fPIE -std=c99 \
 	  -pedantic-errors -ggdb3 -fno-omit-frame-pointer \
-	  -D_POSIX_C_SOURCE=200809L
+	  -D_POSIX_C_SOURCE=200809L -D_DEFAULT_SOURCE
 LDFLAGS := -O2 -fpie -fPIE
 OBJ := ftransfer.o server.o client.o
 
