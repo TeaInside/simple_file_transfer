@@ -53,7 +53,7 @@ init_tcp(struct sockaddr_in *sock, const char *addr, const uint16_t port)
 {
 	int sock_d = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 	if (sock_d < 0)
-		goto ret;
+		return -1;
 
 	memset(sock, 0, sizeof(struct sockaddr_in));
 
@@ -62,7 +62,6 @@ init_tcp(struct sockaddr_in *sock, const char *addr, const uint16_t port)
 	sock->sin_addr.s_addr = inet_addr(addr);
 	sock->sin_port        = htons(port);
 
-ret:
 	return sock_d;
 }
 

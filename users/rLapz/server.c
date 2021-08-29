@@ -9,6 +9,7 @@
  *       success : >=0, failed : <0   [ return value ]
  */
 
+#include <endian.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <inttypes.h>
@@ -92,8 +93,6 @@ recv_file_prop(const int sock_d, packet_t *prop)
 static int
 get_file_prop(const int sock_d, packet_t *prop, struct sockaddr_in *client)
 {
-	memset(prop, 0, sizeof(packet_t));
-
 	if (recv_file_prop(sock_d, prop) < 0)
 		goto err;
 
@@ -103,7 +102,7 @@ get_file_prop(const int sock_d, packet_t *prop, struct sockaddr_in *client)
 	printf(BOLD_WHITE("File properties [%s:%d]") "\n",
 			inet_ntoa(client->sin_addr), ntohs(client->sin_port));
 	printf("|-> File name : %s (%u)\n", prop->file_name, prop->file_name_len);
-	printf("`-> File size : %" PRIu64 " bytes\n", prop->file_size);
+	printf("`-> File size : %" PRIu64 " bytes\n", be64toh(prop->file_size));
 
 	return 0;
 
@@ -117,12 +116,16 @@ recv_packet(const int sock_d)
 	FILE     *file_d;
 	int       client_d;
 	ssize_t   rv_bytes;
-	packet_t  prop;
 	struct    sockaddr_in client;
-	uint64_t  b_total = 0;
+
+	packet_t  prop       = {0};
+	uint64_t  b_total    = 0,
+		  p_size;
 	socklen_t client_len = sizeof(struct sockaddr_in);
+
 	char      buffer[BUFFER_SIZE],
 	          full_path[sizeof(DEST_DIR) + sizeof(prop.file_name)];
+
 
 	if (listen(sock_d, 3) < 0) {
 		perror("recv_packet(): listening");
@@ -153,9 +156,10 @@ recv_packet(const int sock_d)
 		perror("recv_packet(): fopen");
 		goto cleanup;
 	}
+	p_size = be64toh(prop.file_size);
 
 	puts("\nWriting...");
-	while (b_total < prop.file_size && is_interrupted == 0) {
+	while (b_total < p_size && is_interrupted == 0) {
 		rv_bytes = recv(client_d, buffer, sizeof(buffer), 0);
 		if (rv_bytes < 0)
 			break;
@@ -180,7 +184,7 @@ recv_packet(const int sock_d)
 		goto cleanup;
 	}
 
-	if (b_total != prop.file_size) {
+	if (b_total != p_size) {
 		fprintf(stderr, "File \"%s\" is corrupted\n", prop.file_name);
 		goto cleanup;
 	}

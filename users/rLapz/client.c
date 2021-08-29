@@ -9,6 +9,7 @@
  *       success : >=0, failed : <0   [ return value ]
  */
 
+#include <endian.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <inttypes.h>
@@ -78,8 +79,7 @@ set_file_prop(packet_t *prop, char *argv[])
 		goto err;
 	}
 
-	memset(prop, 0, sizeof(packet_t));
-	prop->file_size     = (uint64_t)st.st_size;
+	prop->file_size     = htobe64((uint64_t)st.st_size);
 	prop->file_name_len = (uint8_t)strlen((base_name = basename(full_path)));
 	memcpy(prop->file_name, base_name, (size_t)prop->file_name_len);
 
@@ -89,7 +89,7 @@ set_file_prop(packet_t *prop, char *argv[])
 	puts(BOLD_WHITE("File properties:"));
 	printf("|-> Full path   : %s (%zu)\n", full_path, strlen(full_path));
 	printf("|-> File name   : %s (%u)\n", prop->file_name, prop->file_name_len);
-	printf("|-> File size   : %" PRIu64 " bytes\n", prop->file_size);
+	printf("|-> File size   : %" PRIu64 " bytes\n", st.st_size);
 	printf("`-> Destination : %s:%s\n", argv[0], argv[1]);
 
 	return 0;
@@ -127,9 +127,10 @@ send_file(const int sock_d, char *argv[])
 	FILE    *file_d;
 	ssize_t  s_bytes;
 	size_t   r_bytes;
-	uint64_t b_total = 0;
+	uint64_t b_total = 0,
+		 p_size  = 0;
 	char     buffer[BUFFER_SIZE];
-	packet_t prop;
+	packet_t prop = {0};
 
 	if (set_file_prop(&prop, argv) < 0)
 		return -errno;
@@ -144,9 +145,10 @@ send_file(const int sock_d, char *argv[])
 		perror("send_file(): file_prop_handler");
 		goto cleanup;
 	}
+	p_size = be64toh(prop.file_size);
 
 	puts("\nSending...");
-	while (b_total < prop.file_size && is_interrupted == 0) {
+	while (b_total < p_size && is_interrupted == 0) {
 		r_bytes = fread(buffer, 1, sizeof(buffer), file_d);
 
 		if ((s_bytes = send(sock_d, buffer, r_bytes, 0)) < 0)
@@ -161,7 +163,7 @@ send_file(const int sock_d, char *argv[])
 cleanup:
 	fclose(file_d);
 
-	if (b_total != prop.file_size) {
+	if (b_total != p_size) {
 		perror("send_file()");
 		return -errno;
 	}
