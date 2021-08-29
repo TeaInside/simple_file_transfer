@@ -89,7 +89,7 @@ set_file_prop(packet_t *prop, char *argv[])
 	puts(BOLD_WHITE("File properties:"));
 	printf("|-> Full path   : %s (%zu)\n", full_path, strlen(full_path));
 	printf("|-> File name   : %s (%u)\n", prop->file_name, prop->file_name_len);
-	printf("|-> File size   : %zu bytes\n", st.st_size);
+	printf("|-> File size   : %" PRIu64 " bytes\n", st.st_size);
 	printf("`-> Destination : %s:%s\n", argv[0], argv[1]);
 
 	return 0;
