@@ -30,7 +30,7 @@
 static int connect_to_server(const char *addr, const char *port);
 static int set_file_prop(packet_t *prop, char *argv[]);
 static int send_file_prop(packet_t *prop, const int sock_fd);
-static int send_file(const int sock_d, char *argv[]);
+static int send_file(const int sock_d, packet_t *prop, char *argv[]);
 
 
 /* global variables */
@@ -73,10 +73,8 @@ connect_to_server(const char *addr, const char *port)
 
 	freeaddrinfo(ai);
 
-	if (p == NULL) {
-		fprintf(stderr, "client: connect_to_server(): Unknown error\n");
+	if (p == NULL)
 		return -1;
-	}
 
 	puts("Connected to server\n");
 
@@ -91,27 +89,20 @@ set_file_prop(packet_t *prop, char *argv[])
 	char *base_name;
 	struct stat st;
 
-	if (stat(full_path, &st) < 0) {
-		perror("client: set_file_prop(): stat");
-		return -1;
-	}
+	if (stat(full_path, &st) < 0)
+		goto err;
 
 	if (S_ISDIR(st.st_mode)) {
 		errno = EISDIR;
-		fprintf(stderr, "client: set_file_prop(): \"%s\": %s",
-				full_path, strerror(errno)
-		);
-		return -1;
+		goto err;
 	}
 
 	prop->file_size     = htobe64((uint64_t)st.st_size);
 	prop->file_name_len = (uint8_t)strlen((base_name = basename(full_path)));
 	memcpy(prop->file_name, base_name, (size_t)prop->file_name_len);
 
-	if (file_check(prop) < 0) { /* see: ftransfer.c */
-		fprintf(stderr, "client: set_file_prop(): Invalid file name\n");
-		return -1;
-	}
+	if (file_check(prop) < 0) /* see: ftransfer.c */
+		goto err;
 
 	puts(BOLD_WHITE("File properties:"));
 	printf("|-> Full path   : %s (%zu)\n", full_path, strlen(full_path));
@@ -120,6 +111,13 @@ set_file_prop(packet_t *prop, char *argv[])
 	printf("`-> Destination : %s:%s\n", argv[0], argv[1]);
 
 	return 0;
+
+err:
+	fprintf(stderr, "client: set_file_prop(): \"%s\": %s\n",
+			full_path, strerror(errno)
+	);
+
+	return -1;
 }
 
 
@@ -156,7 +154,7 @@ send_file_prop(packet_t *prop, const int sock_fd)
 
 
 static int
-send_file(const int sock_d, char *argv[])
+send_file(const int sock_d, packet_t *prop, char *argv[])
 {
 	FILE    *file_d;
 	ssize_t  s_bytes;
@@ -164,10 +162,6 @@ send_file(const int sock_d, char *argv[])
 	uint64_t b_total = 0,
 		 p_size  = 0;
 	char     buffer[BUFFER_SIZE];
-	packet_t prop = {0};
-
-	if (set_file_prop(&prop, argv) < 0)
-		return -1;
 
 	/* open file */
 	if ((file_d = fopen(argv[2], "r")) == NULL) {
@@ -175,10 +169,10 @@ send_file(const int sock_d, char *argv[])
 		return -1;
 	}
 
-	if (send_file_prop(&prop, sock_d) < 0)
+	if (send_file_prop(prop, sock_d) < 0)
 		goto cleanup;
 
-	p_size = be64toh(prop.file_size);
+	p_size = be64toh(prop->file_size);
 
 	puts("\nSending...");
 	while (b_total < p_size && is_interrupted == 0) {
@@ -232,12 +226,17 @@ run_client(int argc, char *argv[])
 	}
 
 	int sock_fd;
+	packet_t prop = {0};
+
 	set_signal(); /* see: ftransfer.c */
+
+	if (set_file_prop(&prop, argv) < 0)
+		return EXIT_FAILURE;
 
 	if ((sock_fd = connect_to_server(argv[0], argv[1])) < 0)
 		return EXIT_FAILURE;
 
-	int ret = send_file(sock_fd, argv);
+	int ret = send_file(sock_fd, &prop, argv);
 
 	close(sock_fd);
 

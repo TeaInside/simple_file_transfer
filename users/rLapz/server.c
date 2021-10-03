@@ -100,10 +100,8 @@ get_listener(const char *addr, const char *port)
 
 	freeaddrinfo(ai);
 
-	if (p == NULL) {
-		fprintf(stderr, "server: get_listener(): Unknown error\n");
+	if (p == NULL)
 		return -1;
-	}
 
 	if (listen(ret, 10) < 0) {
 		perror("server: get_listener(): listen");
@@ -171,12 +169,8 @@ server_poll(struct server *s, const int index)
 
 	/* TODO: Multithreading support (file I/O) */
 
-	if (get_file_prop(s, index) < 0)
-		goto cleanup;
-
 	file_io(s, index);
 
-cleanup:
 	close(s->fds.pfds[index].fd);
 	delete_from_pfds(s, index);
 }
@@ -248,8 +242,7 @@ get_file_prop(struct server *s, const int index)
 	}
  
 	if (file_check(&(s->prop)) < 0) {
-		fprintf(stderr, "Invalid file name\n");
-		perror("server: get_file_prop()");
+		fprintf(stderr, "server: get_file_prop(): Invalid file name\n");
 		return -1;
 	}
 
@@ -280,6 +273,9 @@ file_io(struct server *s, const int index)
 	char addr_str[INET6_ADDRSTRLEN];
 	char buffer[BUFFER_SIZE];
 	char full_path[sizeof(DEST_DIR) + sizeof(s->prop.file_name)];
+
+	if (get_file_prop(s, index) < 0)
+		return;
 
 	if (snprintf(full_path, sizeof(full_path), "%s/%s",
 			DEST_DIR, s->prop.file_name) < 0) {
@@ -337,6 +333,7 @@ file_io(struct server *s, const int index)
 		);
 		return;
 	}
+
 	puts("Done!\n");
 }
 
