@@ -48,9 +48,9 @@ static int   add_to_pfds(struct server *s, const int new_fd);
 static void  server_poll(struct server *s, const int index);
 static const char *get_addr_str(char *dest, struct server *s);
 static void  delete_from_pfds(struct server *s, const int index);
-static void  clean_up(struct server *s);
 static int   get_file_prop(struct server *s, const int index);
 static void  file_io(struct server *s, const int index);
+static void  clean_up(struct server *s);
 
 
 /* global variables */
@@ -100,10 +100,8 @@ get_listener(const char *addr, const char *port)
 
 	freeaddrinfo(ai);
 
-	if (p == NULL) {
-		fprintf(stderr, "server: get_listener(): Unknown error\n");
+	if (p == NULL)
 		return -1;
-	}
 
 	if (listen(ret, 10) < 0) {
 		perror("server: get_listener(): listen");
@@ -171,13 +169,14 @@ server_poll(struct server *s, const int index)
 
 	/* TODO: Multithreading support (file I/O) */
 
-	if (get_file_prop(s, index) < 0)
-		goto cleanup;
-
 	file_io(s, index);
 
-cleanup:
 	close(s->fds.pfds[index].fd);
+
+	printf("server: client on socket %d has been closed\n",
+			s->fds.pfds[index].fd
+	);
+
 	delete_from_pfds(s, index);
 }
 
@@ -205,8 +204,10 @@ clean_up(struct server *s)
 {
 	close(s->listener);
 
-	if (s->fds.pfds != NULL)
+	if (s->fds.pfds != NULL) {
 		free(s->fds.pfds);
+		s->fds.pfds = NULL;
+	}
 }
 
 
@@ -248,8 +249,7 @@ get_file_prop(struct server *s, const int index)
 	}
  
 	if (file_check(&(s->prop)) < 0) {
-		fprintf(stderr, "Invalid file name\n");
-		perror("server: get_file_prop()");
+		fprintf(stderr, "server: get_file_prop(): Invalid file name\n");
 		return -1;
 	}
 
@@ -260,7 +260,7 @@ get_file_prop(struct server *s, const int index)
 		return -1;
 	}
 
-	printf(BOLD_WHITE("File properties [%s] from socket %d") "\n",
+	printf(BOLD_WHITE("File properties [%s] on socket %d") "\n",
 				get_addr_str(addr_str, s), s->fds.pfds[index].fd);
 	printf("|-> File name : %s (%u)\n", s->prop.file_name,
 				s->prop.file_name_len);
@@ -281,6 +281,9 @@ file_io(struct server *s, const int index)
 	char buffer[BUFFER_SIZE];
 	char full_path[sizeof(DEST_DIR) + sizeof(s->prop.file_name)];
 
+	if (get_file_prop(s, index) < 0)
+		return;
+
 	if (snprintf(full_path, sizeof(full_path), "%s/%s",
 			DEST_DIR, s->prop.file_name) < 0) {
 
@@ -300,9 +303,10 @@ file_io(struct server *s, const int index)
 		rv_bytes = recv(s->fds.pfds[index].fd, buffer, sizeof(buffer), 0);
 
 		if (rv_bytes < 0) {
-			fprintf(stderr, "server: file_io(): recv: %s on socket %d\n",
-					get_addr_str(addr_str, s),
-					s->fds.pfds[index].fd
+			fprintf(stderr,
+				"server: file_io(): recv: %s on socket %d\n",
+				get_addr_str(addr_str, s),
+				s->fds.pfds[index].fd
 			);
 
 			break;
@@ -337,6 +341,7 @@ file_io(struct server *s, const int index)
 		);
 		return;
 	}
+
 	puts("Done!\n");
 }
 
@@ -398,10 +403,10 @@ run_server(int argc, char *argv[])
 
 	puts("server: Stopped");
 
-	if (errno != 0) {
-		perror("server");
+	if (errno != 0 && errno != EINTR)
 		return EXIT_FAILURE;
-	}
+
+	puts("server: server has been stopped gracefully. :3");
 
 	return EXIT_SUCCESS;
 }

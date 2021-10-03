@@ -33,6 +33,7 @@ interrupt_handler(int sig)
 {
 	is_interrupted = 1;
 	errno = EINTR;
+	putchar('\n');
 
 	(void)sig;
 }
