@@ -172,6 +172,11 @@ server_poll(struct server *s, const int index)
 	file_io(s, index);
 
 	close(s->fds.pfds[index].fd);
+
+	printf("server: server_poll(): client on socket %d has been closed\n",
+			s->fds.pfds[index].fd
+	);
+
 	delete_from_pfds(s, index);
 }
 
@@ -296,9 +301,10 @@ file_io(struct server *s, const int index)
 		rv_bytes = recv(s->fds.pfds[index].fd, buffer, sizeof(buffer), 0);
 
 		if (rv_bytes < 0) {
-			fprintf(stderr, "server: file_io(): recv: %s on socket %d\n",
-					get_addr_str(addr_str, s),
-					s->fds.pfds[index].fd
+			fprintf(stderr,
+				"server: file_io(): recv: %s on socket %d\n",
+				get_addr_str(addr_str, s),
+				s->fds.pfds[index].fd
 			);
 
 			break;
