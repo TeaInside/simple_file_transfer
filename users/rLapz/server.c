@@ -48,9 +48,9 @@ static int   add_to_pfds(struct server *s, const int new_fd);
 static void  server_poll(struct server *s, const int index);
 static const char *get_addr_str(char *dest, struct server *s);
 static void  delete_from_pfds(struct server *s, const int index);
-static void  clean_up(struct server *s);
 static int   get_file_prop(struct server *s, const int index);
 static void  file_io(struct server *s, const int index);
+static void  clean_up(struct server *s);
 
 
 /* global variables */
@@ -204,8 +204,10 @@ clean_up(struct server *s)
 {
 	close(s->listener);
 
-	if (s->fds.pfds != NULL)
+	if (s->fds.pfds != NULL) {
 		free(s->fds.pfds);
+		s->fds.pfds = NULL;
+	}
 }
 
 
@@ -258,7 +260,7 @@ get_file_prop(struct server *s, const int index)
 		return -1;
 	}
 
-	printf(BOLD_WHITE("File properties [%s] from socket %d") "\n",
+	printf(BOLD_WHITE("File properties [%s] on socket %d") "\n",
 				get_addr_str(addr_str, s), s->fds.pfds[index].fd);
 	printf("|-> File name : %s (%u)\n", s->prop.file_name,
 				s->prop.file_name_len);
@@ -403,6 +405,8 @@ run_server(int argc, char *argv[])
 
 	if (errno != 0 && errno != EINTR)
 		return EXIT_FAILURE;
+
+	puts("server: server has been stopped gracefully. :3");
 
 	return EXIT_SUCCESS;
 }

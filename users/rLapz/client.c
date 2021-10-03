@@ -174,7 +174,7 @@ send_file(const int sock_d, packet_t *prop, char *argv[])
 
 	p_size = be64toh(prop->file_size);
 
-	puts("\nSending...");
+	puts("Sending...");
 	while (b_total < p_size && is_interrupted == 0) {
 		r_bytes = fread(buffer, 1, sizeof(buffer), file_d);
 
