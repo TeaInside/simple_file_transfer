@@ -173,7 +173,7 @@ server_poll(struct server *s, const int index)
 
 	close(s->fds.pfds[index].fd);
 
-	printf("server: server_poll(): client on socket %d has been closed\n",
+	printf("server: client on socket %d has been closed\n",
 			s->fds.pfds[index].fd
 	);
 
@@ -401,10 +401,8 @@ run_server(int argc, char *argv[])
 
 	puts("server: Stopped");
 
-	if (errno != 0) {
-		perror("server");
+	if (errno != 0 && errno != EINTR)
 		return EXIT_FAILURE;
-	}
 
 	return EXIT_SUCCESS;
 }
