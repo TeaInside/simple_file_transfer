@@ -21,10 +21,10 @@ typedef struct __attribute__((packed)) packet_t {
 #include "config.h"
 
 
+void die(const char *msg);
 void interrupt_handler(int sig);
-int set_sigaction(struct sigaction *act);
-int init_tcp(struct sockaddr_in *sock, const char *addr,
-		const uint16_t port);
+void *get_in_addr(const struct sockaddr *s);
+void set_signal(void);
 int file_check(const packet_t *p);
 int run_server(int argc, char *argv[]);
 int run_client(int argc, char *argv[]);

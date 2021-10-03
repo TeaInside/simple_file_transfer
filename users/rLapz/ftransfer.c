@@ -9,6 +9,7 @@
 #include <signal.h>
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <unistd.h>
 
 #include <arpa/inet.h>
@@ -19,6 +20,14 @@ static const char *app = NULL;
 
 int is_interrupted = 0;
 
+
+void
+die(const char *msg)
+{
+	perror(msg);
+	exit(1);
+}
+
 void
 interrupt_handler(int sig)
 {
@@ -28,41 +37,31 @@ interrupt_handler(int sig)
 	(void)sig;
 }
 
-int
-set_sigaction(struct sigaction *act)
+void *
+get_in_addr(const struct sockaddr *s)
 {
-	memset(act, 0, sizeof(struct sigaction));
+	if (s->sa_family == AF_INET)
+		return &(((struct sockaddr_in *)s)->sin_addr);
 
-	act->sa_handler = interrupt_handler;
-	if (sigaction(SIGINT, act, NULL) < 0)
-		return -1;
-	if (sigaction(SIGTERM, act, NULL) < 0)
-		return -1;
-	if (sigaction(SIGHUP, act, NULL) < 0)
-		return -1;
-
-	act->sa_handler = SIG_IGN;
-	if (sigaction(SIGPIPE, act, NULL) < 0)
-		return -1;
-
-	return 0;
+	return &(((struct sockaddr_in6 *)s)->sin6_addr);
 }
 
-int
-init_tcp(struct sockaddr_in *sock, const char *addr, const uint16_t port)
+void
+set_signal(void)
 {
-	int sock_d = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-	if (sock_d < 0)
-		return -1;
+	struct sigaction act = {0};
 
-	memset(sock, 0, sizeof(struct sockaddr_in));
+	act.sa_handler = SIG_IGN;
+	if (sigaction(SIGPIPE, &act, NULL) < 0)
+		die("set_signal()");
 
-	/* TCP configuration */
-	sock->sin_family      = AF_INET;
-	sock->sin_addr.s_addr = inet_addr(addr);
-	sock->sin_port        = htons(port);
-
-	return sock_d;
+	act.sa_handler = interrupt_handler;
+	if (sigaction(SIGINT, &act, NULL) < 0)
+		die("set_signal()");
+	if (sigaction(SIGTERM, &act, NULL) < 0)
+		die("set_signal()");
+	if (sigaction(SIGHUP, &act, NULL) < 0)
+		die("set_signal()");
 }
 
 int

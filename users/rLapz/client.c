@@ -11,10 +11,8 @@
 
 #include <endian.h>
 #include <errno.h>
-#include <fcntl.h>
 #include <inttypes.h>
 #include <libgen.h>
-#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -22,14 +20,16 @@
 
 #include <arpa/inet.h>
 #include <sys/stat.h>
+#include <sys/types.h>
+#include <netdb.h>
 
 #include "ftransfer.h"
 
 
 /* function declarations */
-static int init_client(const char *addr, const uint16_t port);
+static int connect_to_server(const char *addr, const char *port);
 static int set_file_prop(packet_t *prop, char *argv[]);
-static int send_file_prop(const int sock_d, packet_t *prop);
+static int send_file_prop(packet_t *prop, const int sock_fd);
 static int send_file(const int sock_d, char *argv[]);
 
 
@@ -37,32 +37,52 @@ static int send_file(const int sock_d, char *argv[]);
 extern int is_interrupted;
 
 
-/* function implementations */
+/*function implementations */
 static int
-init_client(const char *addr, const uint16_t port)
+connect_to_server(const char *addr, const char *port)
 {
-	int sock_d;
-	struct sockaddr_in sock;
+	int ret, rv;
+	struct addrinfo hints = {0}, *ai, *p;
 
-	if ((sock_d = init_tcp(&sock, addr, port)) < 0) { /* see: ftransfer.c */
-		perror("init_client(): socket");
-		return -errno;
+	hints.ai_family   = AF_UNSPEC;   /* IPv4 or IPv6 */
+	hints.ai_socktype = SOCK_STREAM; /* TCP */
+
+	if ((rv = getaddrinfo(addr, port, &hints, &ai)) != 0) {
+		fprintf(stderr, "client: connect_to_server(): getaddrinfo: %s\n",
+				gai_strerror(rv)
+		);
+
+		return -1;
 	}
 
-	puts("Connecting...");
+	for (p = ai; p != NULL; p = p->ai_next) {
+		ret = socket(p->ai_family, p->ai_socktype, p->ai_protocol);
+		if (ret < 0) {
+			perror("client: connect_to_server(): socket");
+			continue;
+		}
 
-	if (connect(sock_d, (struct sockaddr *)&sock, sizeof(sock)) < 0) {
-		perror("init_client(): connect");
-		goto err;
+		if (connect(ret, p->ai_addr, p->ai_addrlen) < 0) {
+			close(ret);
+			perror("client: connect_to_server(): connect");
+			continue;
+		}
+
+		break;
 	}
 
-	puts("Connected to the server\n");
-	return sock_d;
+	freeaddrinfo(ai);
 
-err:
-	close(sock_d);
-	return -errno;
+	if (p == NULL) {
+		fprintf(stderr, "client: connect_to_server(): Unknown error\n");
+		return -1;
+	}
+
+	puts("Connected to server\n");
+
+	return ret;
 }
+
 
 static int
 set_file_prop(packet_t *prop, char *argv[])
@@ -71,20 +91,27 @@ set_file_prop(packet_t *prop, char *argv[])
 	char *base_name;
 	struct stat st;
 
-	if (stat(full_path, &st) < 0)
-		goto err;
+	if (stat(full_path, &st) < 0) {
+		perror("client: set_file_prop(): stat");
+		return -1;
+	}
 
 	if (S_ISDIR(st.st_mode)) {
 		errno = EISDIR;
-		goto err;
+		fprintf(stderr, "client: set_file_prop(): \"%s\": %s",
+				full_path, strerror(errno)
+		);
+		return -1;
 	}
 
 	prop->file_size     = htobe64((uint64_t)st.st_size);
 	prop->file_name_len = (uint8_t)strlen((base_name = basename(full_path)));
 	memcpy(prop->file_name, base_name, (size_t)prop->file_name_len);
 
-	if (file_check(prop) < 0) /* see: ftransfer.c */
-		goto err;
+	if (file_check(prop) < 0) { /* see: ftransfer.c */
+		fprintf(stderr, "client: set_file_prop(): Invalid file name\n");
+		return -1;
+	}
 
 	puts(BOLD_WHITE("File properties:"));
 	printf("|-> Full path   : %s (%zu)\n", full_path, strlen(full_path));
@@ -93,14 +120,11 @@ set_file_prop(packet_t *prop, char *argv[])
 	printf("`-> Destination : %s:%s\n", argv[0], argv[1]);
 
 	return 0;
-
-err:
-	fprintf(stderr, "\nset_file_prop(): %s: %s\n", argv[2], strerror(errno));
-	return -errno;
 }
 
+
 static int
-send_file_prop(const int sock_d, packet_t *prop)
+send_file_prop(packet_t *prop, const int sock_fd)
 {
 	char *raw_prop = (char *)prop;
 	size_t t_bytes = 0,
@@ -108,18 +132,28 @@ send_file_prop(const int sock_d, packet_t *prop)
 	ssize_t s_bytes;
 
 	while (t_bytes < p_size && is_interrupted == 0) {
-		s_bytes = send(sock_d, raw_prop + t_bytes, p_size - t_bytes, 0);
-		if (s_bytes <= 0)
+		s_bytes = send(sock_fd, raw_prop + t_bytes, p_size - t_bytes, 0);
+		if (s_bytes <= 0) {
+			errno = (s_bytes == 0) ? ECANCELED : errno;
+
+			perror("client: send_file_prop(): send");
+
 			break;
+		}
 
 		t_bytes += (size_t)s_bytes;
 	}
 
-	if (t_bytes != p_size)
-		return -errno;
+	if (t_bytes != p_size) {
+		fprintf(stderr, 
+			"File properties was corrupted or it's size did not match!\n"
+		);
+		return -1;
+	}
 
 	return 0;
 }
+
 
 static int
 send_file(const int sock_d, char *argv[])
@@ -133,45 +167,57 @@ send_file(const int sock_d, char *argv[])
 	packet_t prop = {0};
 
 	if (set_file_prop(&prop, argv) < 0)
-		return -errno;
+		return -1;
 
 	/* open file */
 	if ((file_d = fopen(argv[2], "r")) == NULL) {
-		perror("send_file(): open");
-		return -errno;
+		perror("client: send_file(): open");
+		return -1;
 	}
 
-	if (send_file_prop(sock_d, &prop) < 0) {
-		perror("send_file(): file_prop_handler");
+	if (send_file_prop(&prop, sock_d) < 0)
 		goto cleanup;
-	}
+
 	p_size = be64toh(prop.file_size);
 
 	puts("\nSending...");
 	while (b_total < p_size && is_interrupted == 0) {
 		r_bytes = fread(buffer, 1, sizeof(buffer), file_d);
 
-		if ((s_bytes = send(sock_d, buffer, r_bytes, 0)) < 0)
+		if ((s_bytes = send(sock_d, buffer, r_bytes, 0)) < 0) {
+			perror("client: send_file(): send");
 			break;
+		}
 
 		b_total += (uint64_t)s_bytes;
 
-		if (feof(file_d) != 0 || ferror(file_d) != 0)
+		if (feof(file_d) != 0)
 			break;
+
+		if (ferror(file_d) != 0) {
+			perror("client: send_file(): fread");
+			break;
+		}
 	}
 
 cleanup:
 	fclose(file_d);
 
 	if (b_total != p_size) {
-		perror("send_file()");
-		return -errno;
+		fprintf(stderr, 
+			"File \"%s\" was corrupted or file size did not match!\n",
+			argv[2]
+		);
+		return -1;
 	}
 
 	return 0;
 }
 
-int run_client(int argc, char *argv[])
+
+
+int
+run_client(int argc, char *argv[])
 {
 	/*
 	 * argv[0] is the server address
@@ -185,27 +231,22 @@ int run_client(int argc, char *argv[])
 		return EINVAL;
 	}
 
-	int    sock_d;
-	struct sigaction act;
+	int sock_fd;
+	set_signal(); /* see: ftransfer.c */
 
-	if (set_sigaction(&act) < 0) /* see: ftransfer.c */
-		goto err;
+	if ((sock_fd = connect_to_server(argv[0], argv[1])) < 0)
+		return EXIT_FAILURE;
 
-	uint16_t port = (uint16_t)strtol(argv[1], NULL, 0);
-	if ((sock_d = init_client(argv[0], port)) < 0)
-		goto err;
+	int ret = send_file(sock_fd, argv);
 
-	int ret = send_file(sock_d, argv);
-	close(sock_d);
+	close(sock_fd);
 
-	if (ret < 0)
-		goto err;
+	if (ret < 0) {
+		fputs("\nFailed!\n", stderr);
+		return EXIT_FAILURE;
+	}
 
 	puts(BOLD_WHITE("Done!"));
 
 	return EXIT_SUCCESS;
-
-err:
-	fputs("\nFailed!\n", stderr);
-	return EXIT_FAILURE;
 }

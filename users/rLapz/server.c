@@ -1,3 +1,4 @@
+
 // SPDX-License-Identifier: GPL-2.0
 /*
  * Simple file transfer server
@@ -11,25 +12,45 @@
 
 #include <endian.h>
 #include <errno.h>
-#include <fcntl.h>
 #include <inttypes.h>
-#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <poll.h>
 #include <unistd.h>
 
 #include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netdb.h>
 
 #include "ftransfer.h"
 
 
+struct server {
+	int listener;
+	packet_t prop;
+	struct {
+		int fd_count, fd_size, poll_count;
+		struct pollfd *pfds;
+	} fds;
+	struct {
+		socklen_t addr_len;
+		struct sockaddr_storage remote_addr;
+	} net;
+};
+
+
 /* function declarations */
-static int init_server(const char *addr, const uint16_t port);
-static int recv_file_prop(const int sock_d, packet_t *prop);
-static int get_file_prop(const int sock_d, packet_t *prop,
-		struct sockaddr_in *client);
-static void recv_packet(const int sock_d);
+static int   get_listener(const char *addr, const char *port);
+static int   add_to_pfds(struct server *s, const int new_fd);
+static void  server_poll(struct server *s, const int index);
+static const char *get_addr_str(char *dest, struct server *s);
+static void  delete_from_pfds(struct server *s, const int index);
+static void  clean_up(struct server *s);
+static int   get_file_prop(struct server *s, const int index);
+static void  file_io(struct server *s, const int index);
 
 
 /* global variables */
@@ -38,140 +59,270 @@ extern int is_interrupted;
 
 /* function implementations */
 static int
-init_server(const char *addr, const uint16_t port)
+get_listener(const char *addr, const char *port)
 {
-	int sock_opt = 1,
-	    sock_d;
-	struct sockaddr_in srv;
+	int ret, rv, yes = 1;
+	struct addrinfo hints = {0}, *ai, *p;
 
-	if ((sock_d = init_tcp(&srv, addr, port)) < 0) { /* see: ftransfer.c */
-		perror("init_server(): socket");
-		return -errno;
+	hints.ai_family   = AF_UNSPEC;   /* IPv4 or IPv6 */
+	hints.ai_socktype = SOCK_STREAM; /* TCP */
+
+	if ((rv = getaddrinfo(addr, port, &hints, &ai)) != 0) {
+		fprintf(stderr,
+			"server: get_listener(): getaddrinfo: %s\n",
+			gai_strerror(rv)
+		);
+		return -1;
 	}
 
-	/* reuse IP address */
-	if (setsockopt(sock_d, SOL_SOCKET, SO_REUSEADDR,
-				&sock_opt, sizeof(sock_opt)) < 0) {
-		perror("init_server(): setsockopt");
-		goto err;
+	for (p = ai; p != NULL; p = p->ai_next) {
+		ret = socket(p->ai_family, p->ai_socktype, p->ai_protocol);
+		if (ret < 0) {
+			perror("server: get_listener(): socket");
+			continue;
+		}
+
+		if (setsockopt(ret, SOL_SOCKET, SO_REUSEADDR, &yes,
+					sizeof(int)) < 0) {
+			perror("server: get_listener(): setsockopt");
+			close(ret);
+			continue;
+		}
+
+		if (bind(ret, p->ai_addr, p->ai_addrlen) < 0) {
+			perror("server: get_listener(): bind");
+			close(ret);
+			continue;
+		}
+
+		break;
 	}
 
-	if (bind(sock_d, (struct sockaddr *)&srv, sizeof(srv)) < 0) {
-		perror("init_server(): bind");
-		goto err;
+	freeaddrinfo(ai);
+
+	if (p == NULL) {
+		fprintf(stderr, "server: get_listener(): Unknown error\n");
+		return -1;
 	}
 
-	return sock_d;
+	if (listen(ret, 10) < 0) {
+		perror("server: get_listener(): listen");
+		return -1;
+	}
 
-err:
-	close(sock_d);
-	return -errno;
+	return ret;
 }
 
+
 static int
-recv_file_prop(const int sock_d, packet_t *prop)
+add_to_pfds(struct server *s, const int new_fd)
 {
-	char *raw_prop = (char *)prop;
-	size_t t_bytes = 0,
-	       p_size  = sizeof(packet_t);
+	struct pollfd *tmp;
+
+	/* Resizing pfds array */
+	if (s->fds.fd_count == s->fds.fd_size) {
+		s->fds.fd_size *= 2; /* Double it */
+
+		tmp = realloc(s->fds.pfds, sizeof(struct pollfd) * s->fds.fd_size);
+		if (tmp == NULL) {
+			perror("server: add_to_pfds(): malloc");
+			return -1;
+		}
+
+		s->fds.pfds = tmp;
+	}
+
+	s->fds.pfds[s->fds.fd_count].fd     = new_fd;
+	s->fds.pfds[s->fds.fd_count].events = POLLIN;
+
+	(s->fds.fd_count)++;
+
+	return s->fds.fd_count;
+}
+
+
+static void
+server_poll(struct server *s, const int index)
+{
+	int new_fd;
+	char addr_str[INET6_ADDRSTRLEN];
+
+	if (s->fds.pfds[index].fd == s->listener) {
+		s->net.addr_len = sizeof(s->net.remote_addr);
+		new_fd = accept(s->listener,
+				(struct sockaddr *)&(s->net.remote_addr),
+				&(s->net.addr_len));
+
+		if (new_fd < 0) {
+			perror("server: server_poll(): accept");
+			return;
+		}
+
+		printf("server: new connection from %s on socket %d\n\n",
+				get_addr_str(addr_str, s), new_fd);
+
+		if (add_to_pfds(s, new_fd) < 0) {
+			clean_up(s);
+			die("server: server_poll()");
+		}
+
+		return;
+	}
+
+	/* TODO: Multithreading support (file I/O) */
+
+	if (get_file_prop(s, index) < 0)
+		goto cleanup;
+
+	file_io(s, index);
+
+cleanup:
+	close(s->fds.pfds[index].fd);
+	delete_from_pfds(s, index);
+}
+
+
+static const char *
+get_addr_str(char *dest, struct server *s)
+{
+	return  inet_ntop(s->net.remote_addr.ss_family,
+			get_in_addr((struct sockaddr *)&(s->net.remote_addr)),
+			dest, INET6_ADDRSTRLEN
+		);
+}
+
+
+static void
+delete_from_pfds(struct server *s, const int index)
+{
+	s->fds.pfds[index] = s->fds.pfds[s->fds.fd_count -1];
+	(s->fds.fd_count)--;
+}
+
+
+static void
+clean_up(struct server *s)
+{
+	close(s->listener);
+
+	if (s->fds.pfds != NULL)
+		free(s->fds.pfds);
+}
+
+
+static int
+get_file_prop(struct server *s, const int index)
+{
+	char   *raw_prop;
+	char    addr_str[INET6_ADDRSTRLEN];
+	size_t  t_bytes = 0;
+	size_t  p_size  = sizeof(packet_t);
 	ssize_t s_bytes;
 
+	memset(&(s->prop), 0, p_size);
+	raw_prop = (char *)&(s->prop);
+
 	while (t_bytes < p_size && is_interrupted == 0) {
-		s_bytes = recv(sock_d, raw_prop + t_bytes, p_size - t_bytes, 0);
-		if (s_bytes <= 0)
-			break;
+		s_bytes = recv(s->fds.pfds[index].fd,
+				raw_prop + t_bytes, p_size - t_bytes, 0);
+
+		if (s_bytes < 0) {
+			fprintf(stderr,
+				"server: file_io(): recv: %s on socket %d\n",
+				get_addr_str(addr_str, s), s->fds.pfds[index].fd
+			);
+
+			return -1;
+		}
+
+		if (s_bytes == 0) {
+			fprintf(stderr,
+				"server: file_io(): client %s on socket %d was disconnected\n",
+				get_addr_str(addr_str, s), s->fds.pfds[index].fd
+			);
+
+			return -1;
+		}
 
 		t_bytes += (size_t)s_bytes;
 	}
+ 
+	if (file_check(&(s->prop)) < 0) {
+		fprintf(stderr, "Invalid file name\n");
+		perror("server: get_file_prop()");
+		return -1;
+	}
 
-	if (t_bytes != p_size)
-		return -errno;
+	if (t_bytes != p_size) {
+		fprintf(stderr, 
+			"File properties is corrupted or it's size did not match!\n"
+		);
+		return -1;
+	}
+
+	printf(BOLD_WHITE("File properties [%s] from socket %d") "\n",
+				get_addr_str(addr_str, s), s->fds.pfds[index].fd);
+	printf("|-> File name : %s (%u)\n", s->prop.file_name,
+				s->prop.file_name_len);
+	printf("`-> File size : %" PRIu64 " bytes\n", be64toh(s->prop.file_size));
 
 	return 0;
-}
-
-static int
-get_file_prop(const int sock_d, packet_t *prop, struct sockaddr_in *client)
-{
-	if (recv_file_prop(sock_d, prop) < 0)
-		goto err;
-
-	if (file_check(prop) < 0)
-		goto err;
-
-	printf(BOLD_WHITE("File properties [%s:%d]") "\n",
-			inet_ntoa(client->sin_addr), ntohs(client->sin_port));
-	printf("|-> File name : %s (%u)\n", prop->file_name, prop->file_name_len);
-	printf("`-> File size : %" PRIu64 " bytes\n", be64toh(prop->file_size));
-
-	return 0;
-
-err:
-	return -errno;
 }
 
 static void
-recv_packet(const int sock_d)
+file_io(struct server *s, const int index)
 {
-	FILE     *file_d;
-	int       client_d;
-	ssize_t   rv_bytes;
-	struct    sockaddr_in client;
+	FILE    *file_d;
+	ssize_t  rv_bytes;
+	uint64_t b_total = 0;
+	uint64_t p_size;
 
-	packet_t  prop       = {0};
-	uint64_t  b_total    = 0,
-		  p_size;
-	socklen_t client_len = sizeof(struct sockaddr_in);
+	char addr_str[INET6_ADDRSTRLEN];
+	char buffer[BUFFER_SIZE];
+	char full_path[sizeof(DEST_DIR) + sizeof(s->prop.file_name)];
 
-	char      buffer[BUFFER_SIZE],
-	          full_path[sizeof(DEST_DIR) + sizeof(prop.file_name)];
+	if (snprintf(full_path, sizeof(full_path), "%s/%s",
+			DEST_DIR, s->prop.file_name) < 0) {
 
-
-	if (listen(sock_d, 3) < 0) {
-		perror("recv_packet(): listening");
+		perror("server: file_io(): set full path");
 		return;
 	}
-
-	if (getsockname(sock_d, (struct sockaddr *)&client, &client_len) < 0) {
-		perror("recv_packet(): getsockname");
-		return;
-	}
-
-	client_d = accept(sock_d, (struct sockaddr *)&client, &client_len);
-	if (client_d < 0) {
-		perror("recv_packet(): accept");
-		return;
-	}
-
-	/* get file properties */
-	if (get_file_prop(client_d, &prop, &client) < 0) {
-		perror("recv_packet(): get_file_prop");
-		goto cleanup;
-	}
-
-	/* file handler */
-	snprintf(full_path, sizeof(full_path), "%s/%s", DEST_DIR, prop.file_name);
 
 	if ((file_d = fopen(full_path, "w")) == NULL) {
-		perror("recv_packet(): fopen");
-		goto cleanup;
+		perror("server: file_io(): fopen");
+		return;
 	}
-	p_size = be64toh(prop.file_size);
+
+	p_size = be64toh(s->prop.file_size);
 
 	puts("\nWriting...");
 	while (b_total < p_size && is_interrupted == 0) {
-		rv_bytes = recv(client_d, buffer, sizeof(buffer), 0);
-		if (rv_bytes < 0)
+		rv_bytes = recv(s->fds.pfds[index].fd, buffer, sizeof(buffer), 0);
+
+		if (rv_bytes < 0) {
+			fprintf(stderr, "server: file_io(): recv: %s on socket %d\n",
+					get_addr_str(addr_str, s),
+					s->fds.pfds[index].fd
+			);
+
 			break;
+		}
+
 		if (rv_bytes == 0) {
-			errno = ECANCELED;
+			fprintf(stderr,
+				"server: file_io(): client %s on socket %d was disconnected\n",
+				get_addr_str(addr_str, s),
+				s->fds.pfds[index].fd
+			);
 			break;
 		}
 
 		b_total += (uint64_t)fwrite(buffer, 1, (size_t)rv_bytes, file_d);
 
-		if (ferror(file_d) != 0)
+		if (ferror(file_d) != 0) {
+			perror("server: file_io(): fwrite");
 			break;
+		}
 	}
 
 	fflush(file_d);
@@ -179,23 +330,20 @@ recv_packet(const int sock_d)
 
 	fclose(file_d);
 
-	if (errno != 0) {
-		perror("recv_packet()");
-		goto cleanup;
-	}
-
 	if (b_total != p_size) {
-		fprintf(stderr, "File \"%s\" is corrupted\n", prop.file_name);
-		goto cleanup;
+		fprintf(stderr, 
+			"File \"%s\" is corrupted or file size did not match!\n",
+			s->prop.file_name
+		);
+		return;
 	}
-
-	puts(BOLD_WHITE("Done!"));
-
-cleanup:
-	close(client_d);
+	puts("Done!\n");
 }
 
-int run_server(int argc, char *argv[])
+
+
+int
+run_server(int argc, char *argv[])
 {
 	/*
 	 * argv[0] is the bind address
@@ -203,7 +351,7 @@ int run_server(int argc, char *argv[])
 	 */
 
 	if (argc != 2) {
-		printf("Error: Invalid argument on run_server\n");
+		printf("server: Invalid argument on run_server\n");
 		print_help();
 		return EINVAL;
 	}
@@ -211,29 +359,50 @@ int run_server(int argc, char *argv[])
 	printf(BOLD_WHITE("Server started [%s:%s]") "\n", argv[0], argv[1]);
 	printf(BOLD_WHITE("Buffer size: %u") "\n\n", BUFFER_SIZE);
 
-	int    sock_d;
-	struct sigaction act;
+	struct server srv    = {0};
 
-	if (set_sigaction(&act) < 0) /* see: ftransfer.c */
-		goto err;
+	set_signal(); /* see: ftransfer.c */
 
-	uint16_t port = (uint16_t)strtol(argv[1], NULL, 0);
-	if ((sock_d = init_server(argv[0], port)) < 0)
-		goto err;
+	srv.fds.fd_size = 5;
+	srv.fds.pfds    = calloc(sizeof(struct pollfd),
+				sizeof(struct pollfd) * srv.fds.fd_size);
 
-	/* main loop */
+	if (srv.fds.pfds == NULL) {
+		perror("server: run_server(): malloc");
+		return EXIT_FAILURE;
+	}
+
+	if ((srv.listener = get_listener(argv[0], argv[1])) < 0) {
+		free(srv.fds.pfds);
+		return EXIT_FAILURE;
+	}
+
+	srv.fds.pfds[0].fd     = srv.listener;
+	srv.fds.pfds[0].events = POLLIN;
+	srv.fds.fd_count       = 1;
+
+	/* MAIN LOOP */
 	while (is_interrupted == 0) {
 		errno = 0;
-		recv_packet(sock_d);
-	}
-	/* end main loop */
+		srv.fds.poll_count = poll(srv.fds.pfds, srv.fds.fd_count, -1);
+		if (srv.fds.poll_count == -1)
+			perror("server: server_poll(): poll");
 
-	close(sock_d);
-	puts("Stopped");
+		for (int i = 0; i < srv.fds.fd_count; i++) {
+			if (srv.fds.pfds[i].revents & POLLIN)
+				server_poll(&srv, i);
+		}
+	}
+
+	clean_up(&srv);
+
+	puts("server: Stopped");
+
+	if (errno != 0) {
+		perror("server");
+		return EXIT_FAILURE;
+	}
 
 	return EXIT_SUCCESS;
-
-err:
-	fputs("\nFailed!\n", stderr);
-	return EXIT_FAILURE;
 }
+
