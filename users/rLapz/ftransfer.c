@@ -12,8 +12,6 @@
 #include <stdlib.h>
 #include <unistd.h>
 
-#include <arpa/inet.h>
-
 #include "ftransfer.h"
 
 static const char *app = NULL;
@@ -36,15 +34,6 @@ interrupt_handler(int sig)
 	putchar('\n');
 
 	(void)sig;
-}
-
-void *
-get_in_addr(const struct sockaddr *s)
-{
-	if (s->sa_family == AF_INET)
-		return &(((struct sockaddr_in *)s)->sin_addr);
-
-	return &(((struct sockaddr_in6 *)s)->sin6_addr);
 }
 
 void
@@ -70,6 +59,7 @@ file_check(const packet_t *p)
 {
 	if (p->file_name_len == 0 || strstr(p->file_name, "..") != NULL) {
 		errno = EINVAL;
+
 		return -errno;
 	}
 
@@ -90,6 +80,7 @@ int main(int argc, char *argv[])
 
 	if (argc < 2) {
 		print_help();
+
 		return 0;
 	}
 

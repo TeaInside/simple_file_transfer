@@ -23,7 +23,6 @@ typedef struct __attribute__((packed)) packet_t {
 
 void die(const char *msg);
 void interrupt_handler(int sig);
-void *get_in_addr(const struct sockaddr *s);
 void set_signal(void);
 int file_check(const packet_t *p);
 int run_server(int argc, char *argv[]);

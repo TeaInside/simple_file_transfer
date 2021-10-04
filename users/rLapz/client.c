@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Simple file transfer client
+ * Simple file transfer client (IPv4 and IPv6)
  *
  * Copyright (C) 2021  Arthur Lapz <rlapz@gnuweeb.org>
  *
@@ -30,7 +30,7 @@
 static int connect_to_server(const char *addr, const char *port);
 static int set_file_prop(packet_t *prop, char *argv[]);
 static int send_file_prop(packet_t *prop, const int sock_fd);
-static int send_file(const int sock_d, packet_t *prop, char *argv[]);
+static int send_file(const int sock_fd, packet_t *prop, char *argv[]);
 
 
 /* global variables */
@@ -59,12 +59,14 @@ connect_to_server(const char *addr, const char *port)
 		ret = socket(p->ai_family, p->ai_socktype, p->ai_protocol);
 		if (ret < 0) {
 			perror("client: connect_to_server(): socket");
+
 			continue;
 		}
 
 		if (connect(ret, p->ai_addr, p->ai_addrlen) < 0) {
 			close(ret);
 			perror("client: connect_to_server(): connect");
+
 			continue;
 		}
 
@@ -94,6 +96,7 @@ set_file_prop(packet_t *prop, char *argv[])
 
 	if (S_ISDIR(st.st_mode)) {
 		errno = EISDIR;
+
 		goto err;
 	}
 
@@ -122,30 +125,49 @@ err:
 
 
 static int
-send_file_prop(packet_t *prop, const int sock_fd)
+send_all(const int sock_fd, const char *buffer, size_t *size)
 {
-	char *raw_prop = (char *)prop;
-	size_t t_bytes = 0,
-	       p_size  = sizeof(packet_t);
-	ssize_t s_bytes;
+	size_t b_total = 0;
+	size_t b_left  = *size;
+	ssize_t b_sent;
 
-	while (t_bytes < p_size && is_interrupted == 0) {
-		s_bytes = send(sock_fd, raw_prop + t_bytes, p_size - t_bytes, 0);
-		if (s_bytes <= 0) {
-			errno = (s_bytes == 0) ? ECANCELED : errno;
+	while (b_total < (*size) && is_interrupted == 0) {
+		b_sent = send(sock_fd, buffer +b_total, b_left, 0);
 
-			perror("client: send_file_prop(): send");
+		if (b_sent < 0) {
+			perror("client: send_all(): send");
 
 			break;
 		}
 
-		t_bytes += (size_t)s_bytes;
+		if (b_sent == 0)
+			break;
+
+		b_total += (size_t)b_sent;
+		b_left  -= (size_t)b_sent;
 	}
 
-	if (t_bytes != p_size) {
-		fprintf(stderr, 
-			"File properties was corrupted or it's size did not match!\n"
+	(*size) = b_total;
+
+	if (b_sent < 0)
+		return -1;
+
+	return 0;
+}
+
+
+static int
+send_file_prop(packet_t *prop, const int sock_fd)
+{
+	char *raw = (char *)prop;
+	size_t prop_size = sizeof(packet_t);
+	size_t tmp_size  = sizeof(packet_t);
+
+	if (send_all(sock_fd, raw, &prop_size) < 0 || tmp_size != prop_size) {
+		fprintf(stderr,
+			"client: send_file_prop(): Error when sending file prop"
 		);
+
 		return -1;
 	}
 
@@ -154,54 +176,55 @@ send_file_prop(packet_t *prop, const int sock_fd)
 
 
 static int
-send_file(const int sock_d, packet_t *prop, char *argv[])
+send_file(const int sock_fd, packet_t *prop, char *argv[])
 {
-	FILE    *file_d;
-	ssize_t  s_bytes;
-	size_t   r_bytes;
-	uint64_t b_total = 0,
-		 p_size  = 0;
+	FILE    *file_fd;
 	char     buffer[BUFFER_SIZE];
+	size_t   b_read;
+	uint64_t b_total = 0;
+	uint64_t f_size  = 0;
+	size_t   buffer_size = sizeof(buffer);
 
 	/* open file */
-	if ((file_d = fopen(argv[2], "r")) == NULL) {
+	if ((file_fd = fopen(argv[2], "r")) == NULL) {
 		perror("client: send_file(): open");
+
 		return -1;
 	}
 
-	if (send_file_prop(prop, sock_d) < 0)
-		goto cleanup;
+	if (send_file_prop(prop, sock_fd) < 0)
+		return -1;
 
-	p_size = be64toh(prop->file_size);
+	f_size = be64toh(prop->file_size);
 
 	puts("Sending...");
-	while (b_total < p_size && is_interrupted == 0) {
-		r_bytes = fread(buffer, 1, sizeof(buffer), file_d);
+	while (b_total < f_size) {
+		b_read = fread(buffer, 1, buffer_size, file_fd);
 
-		if ((s_bytes = send(sock_d, buffer, r_bytes, 0)) < 0) {
-			perror("client: send_file(): send");
-			break;
-		}
-
-		b_total += (uint64_t)s_bytes;
-
-		if (feof(file_d) != 0)
+		if (send_all(sock_fd, buffer, (size_t *)&b_read) < 0)
 			break;
 
-		if (ferror(file_d) != 0) {
+		b_total += (uint64_t)b_read;
+
+		if (feof(file_fd) != 0)
+			break;
+
+		if (ferror(file_fd) != 0) {
 			perror("client: send_file(): fread");
+
 			break;
 		}
 	}
 
-cleanup:
-	fclose(file_d);
+	fflush(file_fd);
+	fclose(file_fd);
 
-	if (b_total != p_size) {
+	if (b_total != f_size) {
 		fprintf(stderr, 
 			"File \"%s\" was corrupted or file size did not match!\n",
 			argv[2]
 		);
+
 		return -1;
 	}
 
@@ -222,6 +245,7 @@ run_client(int argc, char *argv[])
 	if (argc != 3) {
 		printf("Error: Invalid argument on run_client\n");
 		print_help();
+
 		return EINVAL;
 	}
 
@@ -242,6 +266,7 @@ run_client(int argc, char *argv[])
 
 	if (ret < 0) {
 		fputs("\nFailed!\n", stderr);
+
 		return EXIT_FAILURE;
 	}
 
