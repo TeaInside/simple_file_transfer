@@ -56,7 +56,8 @@ static void        server_poll(struct server *s);
 static void        delete_from_pfds(struct server *s, const int index);
 static const char *get_addr_str(char *dest, const struct sockaddr *s);
 static uint16_t    get_port(const struct sockaddr *s);
-static int         recv_all(char *buffer, size_t *size, const int client_fd);
+static int         recv_all(char *buffer, const size_t buffer_size,
+			size_t *recv_size, const int client_fd);
 static int         get_file_prop(const struct client *c, packet_t *prop);
 static void        file_io(const struct server *s, const int index);
 static void        clean_up(struct server *s);
@@ -163,14 +164,14 @@ add_to_pfds(struct server *s, const int new_fd)
 	s->fds.pfds[i].fd     = new_fd;
 	s->fds.pfds[i].events = POLLIN;
 
-	s->client[i].fd   = s->fds.pfds[i].fd;
-	s->client[i].addr = *(s->addr);         /* copy the value */
+	s->client[i].fd   = new_fd;
+	s->client[i].addr = *(s->addr); /* copy the value */
 	s->client[i].port = htons(get_port((struct sockaddr *)&(s->client[i].addr)));
 
 	get_addr_str(s->client[i].addr_str, (struct sockaddr *)&(s->client[i].addr));
 
 
-	printf("server: new connection from %s:%d on socket %d\n\n",
+	printf("server: new connection from [%s (%d)] on socket %d\n\n",
 			s->client[i].addr_str, s->client[i].port, new_fd
 	);
 
@@ -264,14 +265,15 @@ get_port(const struct sockaddr *s)
 
 
 static int
-recv_all(char *buffer, size_t *size, const int client_fd)
+recv_all(char *buffer, const size_t buffer_size, size_t *recv_size,
+		const int client_fd)
 {
 	size_t  b_total = 0;
-	size_t  b_left  = *size;
-	ssize_t b_recv;
+	ssize_t b_recv  = 0;
 
-	while (b_total < (*size) && is_interrupted == 0) {
-		b_recv = recv(client_fd, buffer + b_total, b_left, 0);
+	while (b_total < buffer_size && is_interrupted == 0) {
+		b_recv = recv(client_fd, buffer + b_total,
+				buffer_size - b_total, 0);
 
 		if (b_recv < 0) {
 			perror("server: recv_all(): recv");
@@ -283,10 +285,9 @@ recv_all(char *buffer, size_t *size, const int client_fd)
 			break;
 
 		b_total += (size_t)b_recv;
-		b_left  -= (size_t)b_recv;
 	}
 
-	(*size) = b_total;
+	(*recv_size) = b_total;
 
 	if (b_recv < 0)
 		return -1;
@@ -298,12 +299,11 @@ recv_all(char *buffer, size_t *size, const int client_fd)
 static int
 get_file_prop(const struct client *c, packet_t *prop)
 {
-	char   *raw       = (char *)prop;
-	size_t  prop_size = sizeof(packet_t);
-	size_t  tmp_size  = sizeof(packet_t);
+	char   *raw = (char *)prop;
+	size_t  recv_size;
 
-	if (recv_all(raw, &prop_size, c->fd) < 0 ||
-			tmp_size != prop_size) {
+	if (recv_all(raw, sizeof(packet_t), &recv_size, c->fd) < 0 ||
+			recv_size != sizeof(packet_t)) {
 
 		fprintf(stderr, 
 			"File properties is corrupted or it's size did not match!\n"
@@ -319,12 +319,14 @@ get_file_prop(const struct client *c, packet_t *prop)
 	}
 
 
-	printf(BOLD_WHITE("File properties [%s:%d] on socket %d") "\n",
+	printf(BOLD_WHITE("File properties [%s (%d)] on socket %d") "\n",
 			c->addr_str, c->port, c->fd
 	);
+
 	printf("|-> File name : %s (%u)\n",
 			prop->file_name, prop->file_name_len
 	);
+
 	printf("`-> File size : %" PRIu64 " bytes\n",
 			be64toh(prop->file_size)
 	);
@@ -336,7 +338,8 @@ get_file_prop(const struct client *c, packet_t *prop)
 static void
 file_io(const struct server *s, const int index)
 {
-	packet_t  prop;
+	packet_t  prop = {0};
+
 	FILE     *file_fd;
 	size_t    b_recv;
 	uint64_t  b_total = 0;
@@ -345,8 +348,6 @@ file_io(const struct server *s, const int index)
 	char      buffer[BUFFER_SIZE];
 	char      full_path[sizeof(DEST_DIR) + sizeof(prop.file_name)];
 
-
-	memset(&prop, 0, sizeof(packet_t));
 
 	if (get_file_prop(&(s->client[index]), &prop) < 0)
 		return;
@@ -371,10 +372,14 @@ file_io(const struct server *s, const int index)
 
 	puts("\nWriting...");
 	while (b_total < f_size && is_interrupted == 0) {
-		if (recv_all(buffer, &b_recv, s->client[index].fd) < 0)
+		if (recv_all(buffer, sizeof(buffer), &b_recv,
+						s->client[index].fd) < 0)
 			break;
 
-		b_total += (uint64_t)fwrite(buffer, 1, b_recv, file_fd);
+		if (b_recv == 0)
+			break;
+
+		b_total  += (uint64_t)fwrite(buffer, 1, b_recv, file_fd);
 
 		if (ferror(file_fd) != 0) {
 			perror("server: file_io(): fwrite");
@@ -383,21 +388,25 @@ file_io(const struct server *s, const int index)
 		}
 	}
 
-	fflush(file_fd);
-	puts("Buffer flushed");
+	printf("server: Flushing buffer... ");
+	if (fflush(file_fd) == 0)
+		puts(BOLD_WHITE("Ok\n"));
+	else
+		fputs(BOLD_WHITE("Failed\n"), stderr);
 
 	fclose(file_fd);
 
 	if (b_total != f_size) {
 		fprintf(stderr, 
-			"File \"%s\" is corrupted or file size did not match!\n",
-			prop.file_name
+			"File \"%s\" is corrupted or file size did not match!\n"
+			"Received: %" PRIu64 " bytes\n",
+			prop.file_name, b_total
 		);
 
 		return;
 	}
 
-	puts("Done!\n");
+	puts(BOLD_WHITE("Done!\n"));
 }
 
 
@@ -434,12 +443,6 @@ run_server(int argc, char *argv[])
 		return EINVAL;
 	}
 
-	printf(BOLD_WHITE("Server started [%s:%s]") "\n", argv[0], argv[1]);
-	printf(BOLD_WHITE("Buffer size: %u") "\n\n", BUFFER_SIZE);
-
-
-	/* --------------------------------------------- */
-
 	struct server srv = {0};
 
 	set_signal(); /* see: ftransfer.c */
@@ -461,6 +464,11 @@ run_server(int argc, char *argv[])
 
 		return EXIT_FAILURE;
 	}
+
+
+	printf(BOLD_WHITE("Server started [%s (%s)]") "\n", argv[0], argv[1]);
+	printf(BOLD_WHITE("Buffer size: %u") "\n\n", BUFFER_SIZE);
+
 
 	srv.fds.pfds[0].fd     = srv.listener;
 	srv.fds.pfds[0].events = POLLIN;

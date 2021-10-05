@@ -132,7 +132,7 @@ send_all(const int sock_fd, const char *buffer, size_t *size)
 	ssize_t b_sent;
 
 	while (b_total < (*size) && is_interrupted == 0) {
-		b_sent = send(sock_fd, buffer +b_total, b_left, 0);
+		b_sent = send(sock_fd, buffer + b_total, b_left, 0);
 
 		if (b_sent < 0) {
 			perror("client: send_all(): send");
@@ -198,7 +198,7 @@ send_file(const int sock_fd, packet_t *prop, char *argv[])
 	f_size = be64toh(prop->file_size);
 
 	puts("Sending...");
-	while (b_total < f_size) {
+	while (b_total < f_size && is_interrupted == 0) {
 		b_read = fread(buffer, 1, buffer_size, file_fd);
 
 		if (send_all(sock_fd, buffer, (size_t *)&b_read) < 0)
@@ -216,12 +216,18 @@ send_file(const int sock_fd, packet_t *prop, char *argv[])
 		}
 	}
 
-	fflush(file_fd);
+	printf("client: Flushing buffer... ");
+	if (fflush(file_fd) == 0)
+		puts(BOLD_WHITE("Ok\n"));
+	else
+		fputs(BOLD_WHITE("Failed\n"), stderr);
+
 	fclose(file_fd);
 
 	if (b_total != f_size) {
 		fprintf(stderr, 
-			"File \"%s\" was corrupted or file size did not match!\n",
+			"client: File \"%s\" is corrupted"
+			" or file size did not match!\n",
 			argv[2]
 		);
 

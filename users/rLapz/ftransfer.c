@@ -60,7 +60,7 @@ file_check(const packet_t *p)
 	if (p->file_name_len == 0 || strstr(p->file_name, "..") != NULL) {
 		errno = EINVAL;
 
-		return -errno;
+		return -1;
 	}
 
 	return 0;
