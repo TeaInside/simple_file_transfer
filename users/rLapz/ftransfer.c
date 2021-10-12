@@ -20,13 +20,6 @@ int is_interrupted = 0;
 
 
 void
-die(const char *msg)
-{
-	perror(msg);
-	exit(1);
-}
-
-void
 interrupt_handler(int sig)
 {
 	is_interrupted = 1;
@@ -43,15 +36,24 @@ set_signal(void)
 
 	act.sa_handler = SIG_IGN;
 	if (sigaction(SIGPIPE, &act, NULL) < 0)
-		die("set_signal()");
+		goto err;
 
 	act.sa_handler = interrupt_handler;
 	if (sigaction(SIGINT, &act, NULL) < 0)
-		die("set_signal()");
+		goto err;
+
 	if (sigaction(SIGTERM, &act, NULL) < 0)
-		die("set_signal()");
+		goto err;
+
 	if (sigaction(SIGHUP, &act, NULL) < 0)
-		die("set_signal()");
+		goto err;
+
+	return;
+
+err:
+	PERROR("set_signal()");
+
+	exit(1);
 }
 
 int
@@ -66,22 +68,24 @@ file_check(const packet_t *p)
 	return 0;
 }
 
-void print_help(void)
+void
+print_help(void)
 {
-	printf("Usage: \n");
+	puts(BOLD_YELLOW("Usage:"));
 	printf("  %s server [bind_addr] [bind_port]\n", app);
 	printf("  %s client [server_addr] [server_port] [filename]\n", app);
 }
 
 
-int main(int argc, char *argv[])
+int
+main(int argc, char *argv[])
 {
 	app = argv[0];
 
 	if (argc < 2) {
 		print_help();
 
-		return 0;
+		return EXIT_SUCCESS;
 	}
 
 	argc -= 2;
@@ -90,7 +94,8 @@ int main(int argc, char *argv[])
 	else if (!strcmp("client", argv[1]))
 		return run_client(argc, argv + 2);
 
-	printf("Error: Invalid argument \"%s\"\n\n", argv[1]);
+	FPERROR("Error: Invalid argument \"%s\"\n\n", argv[1]);
 	print_help();
+
 	return EINVAL;
 }

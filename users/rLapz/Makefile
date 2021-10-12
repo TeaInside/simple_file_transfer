@@ -15,6 +15,7 @@ OBJ := ftransfer.o server.o client.o
 
 all: ftransfer
 
+
 clean:
 	rm -vf ftransfer $(OBJ)
 
@@ -29,5 +30,7 @@ ftransfer.o: ftransfer.c ftransfer.h
 
 ftransfer: $(OBJ)
 	$(LD) $(LDFLAGS) -o $(@) $(^)
+
+$(OBJ): config.h
 
 .PHONY: all clean

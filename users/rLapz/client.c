@@ -3,10 +3,6 @@
  * Simple file transfer client (IPv4 and IPv6)
  *
  * Copyright (C) 2021  Arthur Lapz <rlapz@gnuweeb.org>
- *
- * NOTE: 
- *       true    : 1,   false  : 0    [ boolean      ]
- *       success : >=0, failed : <0   [ return value ]
  */
 
 #include <endian.h>
@@ -26,11 +22,23 @@
 #include "ftransfer.h"
 
 
+struct client {
+	int           tcp_fd   ;
+	const char   *addr     ;
+	const char   *port     ;
+	char         *file_path;
+	uint64_t      file_size;
+	union pkt_uni pkt      ;
+};
+
+
 /* function declarations */
-static int connect_to_server(const char *addr, const char *port);
-static int set_file_prop(packet_t *prop, char *argv[]);
-static int send_file_prop(packet_t *prop, const int sock_fd);
-static int send_file(const int sock_fd, packet_t *prop, char *argv[]);
+static void connect_to_server(struct client *c)               ;
+static void set_file_prop    (struct client *c)               ;
+static int  send_all         (const char *buffer,
+			      size_t *size, const int sock_fd);
+static void send_file_prop   (struct client *c)               ;
+static void send_file        (struct client *c)               ;
 
 
 /* global variables */
@@ -38,34 +46,34 @@ extern int is_interrupted;
 
 
 /*function implementations */
-static int
-connect_to_server(const char *addr, const char *port)
+static void
+connect_to_server(struct client *c)
 {
-	int ret, rv;
-	struct addrinfo hints = {0}, *ai, *p;
+	int ret = 0, rv;
+	struct addrinfo hints = {0}, *ai, *p = NULL;
 
 	hints.ai_family   = AF_UNSPEC;   /* IPv4 or IPv6 */
 	hints.ai_socktype = SOCK_STREAM; /* TCP */
 
-	if ((rv = getaddrinfo(addr, port, &hints, &ai)) != 0) {
-		fprintf(stderr, "client: connect_to_server(): getaddrinfo: %s\n",
-				gai_strerror(rv)
-		);
+	if ((rv = getaddrinfo(c->addr, c->port, &hints, &ai)) != 0) {
+		FPERROR("connect_to_server(): getaddrinfo: %s\n",
+			gai_strerror(rv));
 
-		return -1;
+		goto btm;
 	}
 
 	for (p = ai; p != NULL; p = p->ai_next) {
 		ret = socket(p->ai_family, p->ai_socktype, p->ai_protocol);
+
 		if (ret < 0) {
-			perror("client: connect_to_server(): socket");
+			PERROR("connect_to_server(): socket");
 
 			continue;
 		}
 
 		if (connect(ret, p->ai_addr, p->ai_addrlen) < 0) {
+			PERROR("connect_to_server(): connect");
 			close(ret);
-			perror("client: connect_to_server(): connect");
 
 			continue;
 		}
@@ -75,23 +83,26 @@ connect_to_server(const char *addr, const char *port)
 
 	freeaddrinfo(ai);
 
-	if (p == NULL)
-		return -1;
+btm:
+	if (p == NULL) {
+		FPERROR("connect_to_server(): Failed to connect\n");
 
-	puts("Connected to server\n");
+		exit(1);
+	}
 
-	return ret;
+	INFO("Connected to server\n");
+
+	c->tcp_fd = ret;
 }
 
 
-static int
-set_file_prop(packet_t *prop, char *argv[])
+static void
+set_file_prop(struct client *c)
 {
-	char *full_path = argv[2];
-	char *base_name;
+	char  *base_name;
 	struct stat st;
 
-	if (stat(full_path, &st) < 0)
+	if (stat(c->file_path, &st) < 0)
 		goto err;
 
 	if (S_ISDIR(st.st_mode)) {
@@ -100,51 +111,42 @@ set_file_prop(packet_t *prop, char *argv[])
 		goto err;
 	}
 
-	prop->file_size     = htobe64((uint64_t)st.st_size);
-	prop->file_name_len = (uint8_t)strlen((base_name = basename(full_path)));
-	memcpy(prop->file_name, base_name, (size_t)prop->file_name_len);
+	base_name                 = basename(c->file_path);
+	c->file_size              = (uint64_t)st.st_size;
+	c->pkt.prop.file_size     = htobe64(c->file_size);
+	c->pkt.prop.file_name_len = (uint8_t)strlen(base_name);
 
-	if (file_check(prop) < 0) /* see: ftransfer.c */
+	memcpy(c->pkt.prop.file_name, base_name, c->pkt.prop.file_name_len);
+
+	if (file_check(&(c->pkt.prop)) < 0) /* see: ftransfer.c */
 		goto err;
 
-	puts(BOLD_WHITE("File properties:"));
-	printf("|-> Full path   : %s (%zu)\n", full_path, strlen(full_path));
-	printf("|-> File name   : %s (%u)\n", prop->file_name, prop->file_name_len);
-	printf("|-> File size   : %" PRIu64 " bytes\n", st.st_size);
-	printf("`-> Destination : %s:%s\n", argv[0], argv[1]);
-
-	return 0;
+	return;
 
 err:
-	fprintf(stderr, "client: set_file_prop(): \"%s\": %s\n",
-			full_path, strerror(errno)
-	);
+	FPERROR("set_file_prop(): File \"%s\": %s\n",
+		c->file_path, strerror(errno));
 
-	return -1;
+	exit(1);
 }
 
 
 static int
-send_all(const int sock_fd, const char *buffer, size_t *size)
+send_all(const char *buffer, size_t *size, const int sock_fd)
 {
 	size_t b_total = 0;
-	size_t b_left  = *size;
-	ssize_t b_sent;
+	ssize_t b_sent = 0;
 
 	while (b_total < (*size) && is_interrupted == 0) {
-		b_sent = send(sock_fd, buffer + b_total, b_left, 0);
+		b_sent = send(sock_fd, buffer + b_total, (*size) - b_total, 0);
 
 		if (b_sent < 0) {
-			perror("client: send_all(): send");
+			PERROR("send_all(): send");
 
 			break;
 		}
 
-		if (b_sent == 0)
-			break;
-
 		b_total += (size_t)b_sent;
-		b_left  -= (size_t)b_sent;
 	}
 
 	(*size) = b_total;
@@ -156,52 +158,45 @@ send_all(const int sock_fd, const char *buffer, size_t *size)
 }
 
 
-static int
-send_file_prop(packet_t *prop, const int sock_fd)
+static void
+send_file_prop(struct client *c)
 {
-	char *raw = (char *)prop;
 	size_t prop_size = sizeof(packet_t);
-	size_t tmp_size  = sizeof(packet_t);
 
-	if (send_all(sock_fd, raw, &prop_size) < 0 || tmp_size != prop_size) {
-		fprintf(stderr,
-			"client: send_file_prop(): Error when sending file prop"
-		);
+	if (send_all(c->pkt.raw, &prop_size, c->tcp_fd) < 0 ||
+					sizeof(packet_t) != prop_size) {
+		FPERROR("send_file_prop(): Failed to send file properties");
 
-		return -1;
+		close(c->tcp_fd);
+		exit(1);
 	}
-
-	return 0;
 }
 
 
-static int
-send_file(const int sock_fd, packet_t *prop, char *argv[])
+static void
+send_file(struct client *c)
 {
 	FILE    *file_fd;
-	char     buffer[BUFFER_SIZE];
 	size_t   b_read;
 	uint64_t b_total = 0;
-	uint64_t f_size  = 0;
-	size_t   buffer_size = sizeof(buffer);
+
 
 	/* open file */
-	if ((file_fd = fopen(argv[2], "r")) == NULL) {
-		perror("client: send_file(): open");
+	if ((file_fd = fopen(c->file_path, "r")) == NULL) {
+		FPERROR("send_file(): File \"%s\": %s\n",
+			c->file_path, strerror(errno));
 
-		return -1;
+		close(c->tcp_fd);
+		exit(1);
 	}
 
-	if (send_file_prop(prop, sock_fd) < 0)
-		return -1;
+	memset(&(c->pkt), 0, sizeof(union pkt_uni));
 
-	f_size = be64toh(prop->file_size);
+	INFO("Sending... \n");
+	while (b_total < (c->file_size) && is_interrupted == 0) {
+		b_read = fread(c->pkt.raw, sizeof(char), BUFFER_SIZE, file_fd);
 
-	puts("Sending...");
-	while (b_total < f_size && is_interrupted == 0) {
-		b_read = fread(buffer, 1, buffer_size, file_fd);
-
-		if (send_all(sock_fd, buffer, (size_t *)&b_read) < 0)
+		if (send_all(c->pkt.raw, (size_t *)&b_read, c->tcp_fd) < 0)
 			break;
 
 		b_total += (uint64_t)b_read;
@@ -210,31 +205,27 @@ send_file(const int sock_fd, packet_t *prop, char *argv[])
 			break;
 
 		if (ferror(file_fd) != 0) {
-			perror("client: send_file(): fread");
+			PERROR("send_file(): fread");
 
 			break;
 		}
 	}
 
-	printf("client: Flushing buffer... ");
-	if (fflush(file_fd) == 0)
-		puts(BOLD_WHITE("Ok\n"));
-	else
-		fputs(BOLD_WHITE("Failed\n"), stderr);
-
 	fclose(file_fd);
+	close(c->tcp_fd);
 
-	if (b_total != f_size) {
-		fprintf(stderr, 
-			"client: File \"%s\" is corrupted"
-			" or file size did not match!\n",
-			argv[2]
-		);
+	if (b_total != (c->file_size)) {
+		FPERROR("File size did not match!\n"
+			"Sent: %" PRIu64 " bytes\n", b_total);
 
-		return -1;
+		exit(1);
 	}
 
-	return 0;
+	if (errno != 0) {
+		PERROR("");
+
+		exit(1);
+	}
 }
 
 
@@ -249,34 +240,40 @@ run_client(int argc, char *argv[])
 	 */
 
 	if (argc != 3) {
-		printf("Error: Invalid argument on run_client\n");
+		errno = EINVAL;
+		PERROR("run_client()");
 		print_help();
 
 		return EINVAL;
 	}
 
-	int sock_fd;
-	packet_t prop = {0};
+	struct client client = {
+		.addr      = argv[0],
+		.port      = argv[1],
+		.file_path = argv[2]
+	};
 
 	set_signal(); /* see: ftransfer.c */
+	set_file_prop(&client);
 
-	if (set_file_prop(&prop, argv) < 0)
-		return EXIT_FAILURE;
 
-	if ((sock_fd = connect_to_server(argv[0], argv[1])) < 0)
-		return EXIT_FAILURE;
+	printf(BOLD_YELLOW(
+		"File properties") "\n"
+		"|-> Full path   : %s\n"
+		"|-> File name   : %s\n"
+		"|-> File size   : %" PRIu64 " bytes\n"
+		"|-> Destination : %s (%s)\n"
+		"`-> Buffer size : %u bytes\n\n",
+		client.file_path, client.pkt.prop.file_name, client.file_size,
+		client.addr, client.port, BUFFER_SIZE
+	);
 
-	int ret = send_file(sock_fd, &prop, argv);
 
-	close(sock_fd);
+	connect_to_server(&client);
+	send_file_prop(&client);
+	send_file(&client);
 
-	if (ret < 0) {
-		fputs("\nFailed!\n", stderr);
-
-		return EXIT_FAILURE;
-	}
-
-	puts(BOLD_WHITE("Done!"));
+	INFO("Done!\n");
 
 	return EXIT_SUCCESS;
 }
