@@ -59,10 +59,6 @@ struct server {
 static const char *get_addr     (char *dest, struct sockaddr *sa)  ;
 static uint16_t    get_port     (struct sockaddr *sa)              ;
 
-static void        get_file_prop(struct client *c)                 ;
-static int         file_prep    (struct client *c)                 ;
-static void        file_io      (struct client *c)                 ;
-
 static void        setup_tcp    (struct server *s)                 ;
 static void        init_server  (struct server *s, char *argv[])   ;
 
@@ -72,9 +68,13 @@ static void        client_acc   (struct server *s)                 ;
 static void        client_ev    (struct server *s, const int index);
 static int         add_to_pfds  (struct server *s,
 				 struct sockaddr_storage *addr,
-				 const int new_fd)                 ;
+				 int new_fd)                       ;
 static void        del_from_pfds(struct server *s, const int index);
 static void        cleanup      (struct server *s)                 ;
+
+static void        get_file_prop(struct client *c)                 ;
+static int         file_prep    (struct client *c)                 ;
+static void        file_io      (struct client *c)                 ;
 
 
 
@@ -109,139 +109,6 @@ get_port(struct sockaddr *sa)
 		port = ((struct sockaddr_in6 *)sa)->sin6_port; /* IPv6 */
 
 	return htons(port);
-}
-
-
-static void
-get_file_prop(struct client *c)
-{
-	const size_t p_size = sizeof(packet_t);
-	ssize_t      b_recv;
-
-	if (c->recvd_bytes < p_size) {
-		b_recv = recv(c->sock_fd, c->pkt.raw + (c->recvd_bytes),
-				p_size - (c->recvd_bytes), 0);
-
-		if (b_recv < 0) {
-			PERROR("get_file_prop()");
-
-			goto done;
-		}
-
-		if (b_recv == 0)
-			goto done;
-
-		c->recvd_bytes += (uint64_t)b_recv;
-
-		return;
-	}
-
-
-	if (file_check(&(c->pkt.prop)) < 0) {
-		FPERROR("get_file_prop(): Invalid file name\n");
-
-		goto done;
-	}
-
-	c->got_file_prop = true;
-	c->recvd_bytes   = 0;
-	c->file_size     = be64toh(c->pkt.prop.file_size);
-
-	memcpy(c->file_name, c->pkt.prop.file_name, FILE_NAME_LEN);
-
-
-	printf(BOLD_YELLOW(
-		"File properties [%s (%u)] on socket %d") "\n"
-		"|-> File name: %s (%u)\n"
-		"`-> File size: %" PRIu64 " bytes\n\n",
-
-		c->addr, c->port, c->sock_fd,
-		c->file_name, c->pkt.prop.file_name_len, c->file_size
-	);
-
-	return;
-
-done:
-	c->status      = DONE;
-	c->recvd_bytes = 0;
-}
-
-
-static int
-file_prep(struct client *c)
-{
-	char s_path[sizeof(DEST_DIR) + FILE_NAME_LEN];
-
-	if (snprintf(s_path, sizeof(s_path), "%s/%s",
-					DEST_DIR, c->file_name) < 0) {
-
-		PERROR("file_prep(): set storage path");
-
-		return -1;
-	}
-
-	if ((c->file_fd = fopen(s_path, "w")) == NULL) {
-		FPERROR("file_prep(): fopen: \"%s\": %s\n",
-			s_path, strerror(errno));
-
-		return -1;
-	}
-
-	return 0;
-}
-
-
-static void
-file_io(struct client *c)
-{
-	ssize_t b_recv;
-	size_t  b_wr;
-
-	if (c->file_fd == NULL) {
-		if (file_prep(c) < 0)
-			goto cleanup;
-	}
-
-	if (c->recvd_bytes < c->file_size) {
-		b_recv = recv(c->sock_fd, c->pkt.raw, BUFFER_SIZE, 0);
-		if (b_recv < 0) {
-			PERROR("file_io(): recv");
-
-			goto cleanup;
-		}
-
-		if (b_recv == 0)
-			goto cleanup;
-
-		b_wr = fwrite(c->pkt.raw, 1, (size_t)b_recv, c->file_fd);
-		c->recvd_bytes += (uint64_t)b_wr;
-
-		if (ferror(c->file_fd) != 0) {
-			PERROR("file_io(): fwrite");
-
-			goto cleanup;
-		}
-
-		return;
-	}
-
-cleanup:
-	if (c->recvd_bytes != c->file_size) {
-		FPERROR("File \"%s\" is corrupted or file size did not match!\n"
-			BOLD_WHITE("Received: ") "%" PRIu64 " bytes\n\n",
-			c->file_name, c->recvd_bytes
-		);
-	}
-
-	if (c->file_fd != NULL) {
-		INFO("Flushing file buffer...\n");
-		fflush(c->file_fd);
-		fclose(c->file_fd);
-		c->file_fd = NULL;
-	}
-
-	c->status      = DONE;
-	c->recvd_bytes = 0;
 }
 
 
@@ -425,13 +292,13 @@ client_ev(struct server *s, const int index)
 
 
 static int
-add_to_pfds(struct server *s, struct sockaddr_storage *addr, const int new_fd)
+add_to_pfds(struct server *s, struct sockaddr_storage *addr, int new_fd)
 {
 	struct pollfd *new_pfd;
 	struct client *new_cli;
 
 	if (s->fd_count >= MAX_CLIENTS)
-		return -1;
+		goto err;
 
 	/* Resize pdfs and client array */
 	if (s->fd_count == s->fd_size) {
@@ -441,14 +308,14 @@ add_to_pfds(struct server *s, struct sockaddr_storage *addr, const int new_fd)
 		if (new_pfd == NULL) {
 			PERROR("add_to_pfds(): malloc for fds");
 
-			return -1;
+			goto err;
 		}
 
 		new_cli = realloc(s->clients, sizeof(struct client) * s->fd_size);
 		if (new_cli == NULL) {
 			PERROR("add_to_pfds(): malloc for clients");
 
-			return -1;
+			goto err;
 		}
 
 		s->pfds    = new_pfd;
@@ -472,7 +339,7 @@ add_to_pfds(struct server *s, struct sockaddr_storage *addr, const int new_fd)
 	if (get_addr(s->clients[i].addr, (struct sockaddr *)addr) == NULL) {
 		PERROR("add_to_pfds(): inet_ntop");
 
-		return -1;
+		goto err;
 	}
 
 
@@ -483,6 +350,11 @@ add_to_pfds(struct server *s, struct sockaddr_storage *addr, const int new_fd)
 	(s->fd_count)++;
 
 	return s->fd_count;
+
+err:
+	close(new_fd);
+
+	return -1;
 }
 
 
@@ -519,6 +391,139 @@ cleanup(struct server *s)
 		free(s->clients);
 		s->clients = NULL;
 	}
+}
+
+
+static void
+get_file_prop(struct client *c)
+{
+	const size_t p_size = sizeof(packet_t);
+	ssize_t      b_recv;
+
+	if (c->recvd_bytes < p_size) {
+		b_recv = recv(c->sock_fd, c->pkt.raw + (c->recvd_bytes),
+				p_size - (c->recvd_bytes), 0);
+
+		if (b_recv < 0) {
+			PERROR("get_file_prop()");
+
+			goto done;
+		}
+
+		if (b_recv == 0)
+			goto done;
+
+		c->recvd_bytes += (uint64_t)b_recv;
+
+		return;
+	}
+
+
+	if (file_check(&(c->pkt.prop)) < 0) {
+		FPERROR("get_file_prop(): Invalid file name\n");
+
+		goto done;
+	}
+
+	c->got_file_prop = true;
+	c->recvd_bytes   = 0;
+	c->file_size     = be64toh(c->pkt.prop.file_size);
+
+	memcpy(c->file_name, c->pkt.prop.file_name, FILE_NAME_LEN);
+
+
+	printf(BOLD_YELLOW(
+		"File properties [%s (%u)] on socket %d") "\n"
+		"|-> File name: %s (%u)\n"
+		"`-> File size: %" PRIu64 " bytes\n\n",
+
+		c->addr, c->port, c->sock_fd,
+		c->file_name, c->pkt.prop.file_name_len, c->file_size
+	);
+
+	return;
+
+done:
+	c->status      = DONE;
+	c->recvd_bytes = 0;
+}
+
+
+static int
+file_prep(struct client *c)
+{
+	char s_path[sizeof(DEST_DIR) + FILE_NAME_LEN];
+
+	if (snprintf(s_path, sizeof(s_path), "%s/%s",
+					DEST_DIR, c->file_name) < 0) {
+
+		PERROR("file_prep(): set storage path");
+
+		return -1;
+	}
+
+	if ((c->file_fd = fopen(s_path, "w")) == NULL) {
+		FPERROR("file_prep(): fopen: \"%s\": %s\n",
+			s_path, strerror(errno));
+
+		return -1;
+	}
+
+	return 0;
+}
+
+
+static void
+file_io(struct client *c)
+{
+	ssize_t b_recv;
+	size_t  b_wr;
+
+	if (c->file_fd == NULL) {
+		if (file_prep(c) < 0)
+			goto cleanup;
+	}
+
+	if (c->recvd_bytes < c->file_size) {
+		b_recv = recv(c->sock_fd, c->pkt.raw, BUFFER_SIZE, 0);
+		if (b_recv < 0) {
+			PERROR("file_io(): recv");
+
+			goto cleanup;
+		}
+
+		if (b_recv == 0)
+			goto cleanup;
+
+		b_wr = fwrite(c->pkt.raw, 1, (size_t)b_recv, c->file_fd);
+		c->recvd_bytes += (uint64_t)b_wr;
+
+		if (ferror(c->file_fd) != 0) {
+			PERROR("file_io(): fwrite");
+
+			goto cleanup;
+		}
+
+		return;
+	}
+
+cleanup:
+	if (c->recvd_bytes != c->file_size) {
+		FPERROR("File \"%s\" is corrupted or file size did not match!\n"
+			BOLD_WHITE("Received: ") "%" PRIu64 " bytes\n\n",
+			c->file_name, c->recvd_bytes
+		);
+	}
+
+	if (c->file_fd != NULL) {
+		INFO("Flushing file buffer...\n");
+		fflush(c->file_fd);
+		fclose(c->file_fd);
+		c->file_fd = NULL;
+	}
+
+	c->status      = DONE;
+	c->recvd_bytes = 0;
 }
 
 
