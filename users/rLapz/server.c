@@ -44,8 +44,14 @@ struct client {
 
 
 struct server {
+	/* pfds */
 	uint16_t         fd_count;
 	uint16_t         fd_size ;
+
+	/* clients */
+	uint16_t         cl_count;
+	uint16_t         cl_size ;
+
 	int              listener;
 	int              poll_ret;
 	const char      *addr    ;
@@ -58,20 +64,17 @@ struct server {
 /* function declarations */
 static const char *get_addr     (char *dest, struct sockaddr *sa)  ;
 static uint16_t    get_port     (struct sockaddr *sa)              ;
-
 static void        setup_tcp    (struct server *s)                 ;
 static void        init_server  (struct server *s, char *argv[])   ;
-
 static int         server_poll  (struct server *s)                 ;
 static void        handle_evs   (struct server *s)                 ;
 static void        client_acc   (struct server *s)                 ;
 static void        client_ev    (struct server *s, const int index);
 static int         add_to_pfds  (struct server *s,
 				 struct sockaddr_storage *addr,
-				 int new_fd)                       ;
+				 const int new_fd)                 ;
 static void        del_from_pfds(struct server *s, const int index);
 static void        cleanup      (struct server *s)                 ;
-
 static void        get_file_prop(struct client *c)                 ;
 static int         file_prep    (struct client *c)                 ;
 static void        file_io      (struct client *c)                 ;
@@ -183,6 +186,7 @@ init_server(struct server *s, char *argv[])
 	s->addr    = argv[0];
 	s->port    = argv[1];
 	s->fd_size = INIT_CLIENT_SIZE;
+	s->cl_size = INIT_CLIENT_SIZE;
 
 	setup_tcp(s);
 
@@ -192,7 +196,7 @@ init_server(struct server *s, char *argv[])
 		exit(1);
 	}
 
-	if ((s->clients = malloc(sizeof(struct client) * s->fd_size)) == NULL) {
+	if ((s->clients = malloc(sizeof(struct client) * s->cl_size)) == NULL) {
 		PERROR("run_server(): malloc for clients");
 		free(s->pfds);
 
@@ -202,6 +206,7 @@ init_server(struct server *s, char *argv[])
 	s->pfds[0].fd     = s->listener;
 	s->pfds[0].events = POLLIN;
 	s->fd_count       = 1;
+	s->cl_count       = 0;
 }
 
 
@@ -277,7 +282,7 @@ client_acc(struct server *s)
 static void
 client_ev(struct server *s, const int index)
 {
-	struct client *c = &(s->clients[index]);
+	struct client *c = &(s->clients[index -1]);
 
 	if (c->status == DONE) {
 		del_from_pfds(s, index);
@@ -292,51 +297,59 @@ client_ev(struct server *s, const int index)
 
 
 static int
-add_to_pfds(struct server *s, struct sockaddr_storage *addr, int new_fd)
+add_to_pfds(struct server *s, struct sockaddr_storage *addr, const int new_fd)
 {
 	struct pollfd *new_pfd;
-	struct client *new_cli;
+	struct client *new_cl;
 
-	if (s->fd_count >= MAX_CLIENTS)
+	if (s->cl_count > MAX_CLIENTS)
 		goto err;
 
 	/* Resize pdfs and client array */
 	if (s->fd_count == s->fd_size) {
-		s->fd_size *= 2; /* Double it */
+		const uint16_t new_fd_size = s->fd_size * 2;
 
-		new_pfd = realloc(s->pfds, sizeof(struct pollfd) * s->fd_size);
+		new_pfd = realloc(s->pfds, sizeof(struct pollfd) * new_fd_size);
 		if (new_pfd == NULL) {
 			PERROR("add_to_pfds(): malloc for fds");
 
 			goto err;
 		}
 
-		new_cli = realloc(s->clients, sizeof(struct client) * s->fd_size);
-		if (new_cli == NULL) {
+		s->pfds    = new_pfd;
+		s->fd_size = new_fd_size;
+	}
+
+	if (s->cl_count == s->cl_size) {
+		const uint16_t new_cl_size = s->cl_size * 2;
+
+		new_cl = realloc(s->clients, sizeof(struct client) * new_cl_size);
+		if (new_cl == NULL) {
 			PERROR("add_to_pfds(): malloc for clients");
 
 			goto err;
 		}
 
-		s->pfds    = new_pfd;
-		s->clients = new_cli;
+		s->clients = new_cl;
+		s->cl_size = new_cl_size;
 	}
 
 
-	uint16_t i = s->fd_count;
+	const uint16_t cl  = s->cl_count;
+	const uint16_t pfd = s->fd_count; 
 
 	/* clearing old values */
-	memset(s->pfds +i, 0, sizeof(struct pollfd));
-	memset(s->clients +i, 0, sizeof(struct client));
+	memset(&(s->pfds[pfd]),   0, sizeof(struct pollfd));
+	memset(&(s->clients[cl]), 0, sizeof(struct client));
 
-	s->pfds[i].fd     = new_fd;
-	s->pfds[i].events = POLLIN;
+	s->pfds[pfd].fd     = new_fd;
+	s->pfds[pfd].events = POLLIN;
 
-	s->clients[i].got_file_prop = false;
-	s->clients[i].sock_fd       = new_fd;
-	s->clients[i].port          = get_port((struct sockaddr *)addr);
+	s->clients[cl].got_file_prop = false;
+	s->clients[cl].sock_fd       = new_fd;
+	s->clients[cl].port          = get_port((struct sockaddr *)addr);
 
-	if (get_addr(s->clients[i].addr, (struct sockaddr *)addr) == NULL) {
+	if (get_addr(s->clients[cl].addr, (struct sockaddr *)addr) == NULL) {
 		PERROR("add_to_pfds(): inet_ntop");
 
 		goto err;
@@ -344,12 +357,13 @@ add_to_pfds(struct server *s, struct sockaddr_storage *addr, int new_fd)
 
 
 	INFO("New connection from \"%s (%d)\" on socket %d\n",
-		s->clients[i].addr, s->clients[i].port, new_fd
+		s->clients[cl].addr, s->clients[cl].port, new_fd
 	);
 
 	(s->fd_count)++;
+	(s->cl_count)++;
 
-	return s->fd_count;
+	return 0;
 
 err:
 	close(new_fd);
@@ -361,17 +375,20 @@ err:
 static void
 del_from_pfds(struct server *s, const int index)
 {
+	const int cl_idx = index -1;
+
 	INFO("Closing connection from \"%s (%d)\" on socket %d\n",
-		s->clients[index].addr, s->clients[index].port,
-		s->clients[index].sock_fd
+		s->clients[cl_idx].addr, s->clients[cl_idx].port,
+		s->clients[cl_idx].sock_fd
 	);
 
-	s->pfds[index] = s->pfds[s->fd_count -1];
+	close(s->clients[cl_idx].sock_fd);
 
-	close(s->clients[index].sock_fd);
-	s->clients[index] = s->clients[s->fd_count -1];
+	s->pfds[index]     = s->pfds[s->fd_count -1];
+	s->clients[cl_idx] = s->clients[s->cl_count -1];
 
 	(s->fd_count)--;
+	(s->cl_count)--;
 
 	INFO("Done\n");
 }
