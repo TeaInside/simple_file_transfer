@@ -80,10 +80,8 @@ static int         file_prep    (struct client *c)                 ;
 static void        file_io      (struct client *c)                 ;
 
 
-
 /* global variables */
 extern int is_interrupted;
-
 
 
 /* function implementations */
@@ -228,9 +226,13 @@ server_poll(struct server *s)
 		s->poll_ret = poll(s->pfds, s->fd_count, -1);
 
 		if (s->poll_ret < 0) {
-			PERROR("server_poll(): poll");
+			if (errno != EINTR) {
+				PERROR("server_poll(): poll");
 
-			return -1;
+				return -1;
+			}
+
+			break;
 		}
 
 		handle_evs(s);
@@ -461,8 +463,7 @@ get_file_prop(struct client *c)
 	return;
 
 done:
-	c->status      = DONE;
-	c->recvd_bytes = 0;
+	c->status = DONE;
 }
 
 
@@ -534,13 +535,12 @@ cleanup:
 
 	if (c->file_fd != NULL) {
 		INFO("Flushing file buffer...\n");
+
 		fflush(c->file_fd);
 		fclose(c->file_fd);
-		c->file_fd = NULL;
 	}
 
-	c->status      = DONE;
-	c->recvd_bytes = 0;
+	c->status = DONE;
 }
 
 
@@ -573,11 +573,19 @@ run_server(int argc, char *argv[])
 
 	cleanup(&srv);
 
-	if (ret < 0 || (errno != 0 && errno != EINTR))
-		return EXIT_FAILURE;
+	if (ret < 0)
+		goto err;
+
+	if (errno != 0 && errno != EINTR)
+		goto err;
 
 	INFO("Server has stopped gracefully. :3\n");
 
 	return 0;
+
+err:
+	PERROR("run_server()");
+
+	return EXIT_FAILURE;
 }
 

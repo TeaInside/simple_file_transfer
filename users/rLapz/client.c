@@ -222,7 +222,7 @@ send_file(struct client *c)
 	}
 
 	if (errno != 0) {
-		PERROR("");
+		PERROR("send_file()");
 
 		exit(1);
 	}
