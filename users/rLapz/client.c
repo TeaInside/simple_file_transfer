@@ -1,212 +1,279 @@
-/* @author rLapz <arthurlapz@gmail.com>
- * @license MIT
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * Simple file transfer client (IPv4 and IPv6)
  *
- * This is part of simple_file_transfer
- * https://github.com/teainside/simple_file_transfer
- *
- * NOTE: true = 0, false = 1
+ * Copyright (C) 2021  Arthur Lapz <rlapz@gnuweeb.org>
  */
 
-#include <fcntl.h>
+#include <endian.h>
+#include <errno.h>
+#include <inttypes.h>
+#include <libgen.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
 #include <arpa/inet.h>
-#include <sys/types.h>
-#include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/types.h>
+#include <netdb.h>
 
-/* local include */
-#include "data_structure.h"
+#include "ftransfer.h"
 
-/* macros */
-#define TRUE	0
-#define FALSE	1
+
+struct client {
+	int           tcp_fd   ;
+	const char   *addr     ;
+	const char   *port     ;
+	char         *file_path;
+	uint64_t      file_size;
+	union pkt_uni pkt      ;
+};
+
 
 /* function declarations */
-static int inet_handler(const char* address,
-		uint16_t port, const char* filename);
-static char * get_basename(const char *path);
+static void connect_to_server(struct client *c)               ;
+static void set_file_prop    (struct client *c)               ;
+static int  send_all         (const char *buffer,
+			      size_t *size, const int sock_fd);
+static void send_file_prop   (struct client *c)               ;
+static void send_file        (struct client *c)               ;
 
-/* global variable declarations */
-/* anyway, there is no global variable here, yay! */
+
+/* global variables */
+extern int is_interrupted;
+
+
+/*function implementations */
+static void
+connect_to_server(struct client *c)
+{
+	int ret = 0, rv;
+	struct addrinfo hints = {0}, *ai, *p = NULL;
+
+	hints.ai_family   = AF_UNSPEC;   /* IPv4 or IPv6 */
+	hints.ai_socktype = SOCK_STREAM; /* TCP */
+
+	if ((rv = getaddrinfo(c->addr, c->port, &hints, &ai)) != 0) {
+		FPERROR("connect_to_server(): getaddrinfo: %s\n",
+			gai_strerror(rv));
+
+		goto btm;
+	}
+
+	for (p = ai; p != NULL; p = p->ai_next) {
+		ret = socket(p->ai_family, p->ai_socktype, p->ai_protocol);
+
+		if (ret < 0) {
+			PERROR("connect_to_server(): socket");
+
+			continue;
+		}
+
+		if (connect(ret, p->ai_addr, p->ai_addrlen) < 0) {
+			PERROR("connect_to_server(): connect");
+			close(ret);
+
+			continue;
+		}
+
+		break;
+	}
+
+	freeaddrinfo(ai);
+
+btm:
+	if (p == NULL) {
+		FPERROR("connect_to_server(): Failed to connect\n");
+
+		exit(1);
+	}
+
+	INFO("Connected to server\n");
+
+	c->tcp_fd = ret;
+}
+
+
+static void
+set_file_prop(struct client *c)
+{
+	char  *base_name;
+	struct stat st;
+
+	if (stat(c->file_path, &st) < 0)
+		goto err;
+
+	if (S_ISDIR(st.st_mode)) {
+		errno = EISDIR;
+
+		goto err;
+	}
+
+	base_name                 = basename(c->file_path);
+	c->file_size              = (uint64_t)st.st_size;
+	c->pkt.prop.file_size     = htobe64(c->file_size);
+	c->pkt.prop.file_name_len = (uint8_t)strlen(base_name);
+
+	memcpy(c->pkt.prop.file_name, base_name, c->pkt.prop.file_name_len);
+
+	if (file_check(&(c->pkt.prop)) < 0) /* see: ftransfer.c */
+		goto err;
+
+	return;
+
+err:
+	FPERROR("set_file_prop(): File \"%s\": %s\n",
+		c->file_path, strerror(errno));
+
+	exit(1);
+}
+
+
+static int
+send_all(const char *buffer, size_t *size, const int sock_fd)
+{
+	size_t b_total = 0;
+	ssize_t b_sent = 0;
+
+	while (b_total < (*size) && is_interrupted == 0) {
+		b_sent = send(sock_fd, buffer + b_total, (*size) - b_total, 0);
+
+		if (b_sent < 0) {
+			PERROR("send_all(): send");
+
+			break;
+		}
+
+		b_total += (size_t)b_sent;
+	}
+
+	(*size) = b_total;
+
+	if (b_sent < 0)
+		return -1;
+
+	return 0;
+}
+
+
+static void
+send_file_prop(struct client *c)
+{
+	size_t prop_size = sizeof(packet_t);
+
+	if (send_all(c->pkt.raw, &prop_size, c->tcp_fd) < 0 ||
+					sizeof(packet_t) != prop_size) {
+		FPERROR("send_file_prop(): Failed to send file properties");
+
+		close(c->tcp_fd);
+		exit(1);
+	}
+}
+
+
+static void
+send_file(struct client *c)
+{
+	FILE    *file_fd;
+	size_t   b_read;
+	uint64_t b_total = 0;
+
+
+	/* open file */
+	if ((file_fd = fopen(c->file_path, "r")) == NULL) {
+		FPERROR("send_file(): File \"%s\": %s\n",
+			c->file_path, strerror(errno));
+
+		close(c->tcp_fd);
+		exit(1);
+	}
+
+	memset(&(c->pkt), 0, sizeof(union pkt_uni));
+
+	INFO("Sending... \n");
+	while (b_total < (c->file_size) && is_interrupted == 0) {
+		b_read = fread(c->pkt.raw, sizeof(char), BUFFER_SIZE, file_fd);
+
+		if (send_all(c->pkt.raw, (size_t *)&b_read, c->tcp_fd) < 0)
+			break;
+
+		b_total += (uint64_t)b_read;
+
+		if (feof(file_fd) != 0)
+			break;
+
+		if (ferror(file_fd) != 0) {
+			PERROR("send_file(): fread");
+
+			break;
+		}
+	}
+
+	fclose(file_fd);
+	close(c->tcp_fd);
+
+	if (b_total != (c->file_size)) {
+		FPERROR("File size did not match!\n"
+			"Sent: %" PRIu64 " bytes\n", b_total);
+
+		exit(1);
+	}
+
+	if (errno != 0) {
+		PERROR("send_file()");
+
+		exit(1);
+	}
+}
+
 
 
 int
-main(int argc, char *argv[])
+run_client(int argc, char *argv[])
 {
-	if (argc < 4) {
-		printf("Usage:\n\t%s [address] [port] [file_target]\n", argv[0]);
-		return EXIT_FAILURE;
-	}
-
-	return inet_handler(argv[1], (uint16_t)atoi(argv[2]), argv[3]);
-}
-
-/* function for handling internet connection
- * and file i/o operations.
- * sadly, not written into separated function, yet!
- */
-static int
-inet_handler(const char* address,
-		uint16_t port, const char* filename)
-{
-	struct stat s_file	= {0};
-	struct sockaddr_in server = {0};
-
-	short int is_error	= FALSE;
-	int client_fd		= 0;
-	int file_fd		= 0;
-	ssize_t read_bytes	= 0;
-	ssize_t send_bytes	= 0;
-	size_t sent_bytes	= 0;
-	/* why heap? because I need flexible memory size, though. */
-	char *data_arena	= NULL;
-	char *data_arena_tmp	= NULL;
-	packet *packet_data	= NULL;
-	char *basename		= NULL;
-	
-
-	data_arena = calloc(sizeof(packet), sizeof(packet));
-	if (data_arena == NULL) {
-		perror("Allocation data_arena");
-		is_error = TRUE;
-		return EXIT_FAILURE;
-	}
-	packet_data = (packet*)data_arena;
-
-	/* file checking */
-	if (stat(filename, &s_file) < 0) {
-		perror(filename);
-		is_error = TRUE;
-		goto cleanup;
-	}
-
 	/*
-	 * set file properties
+	 * argv[0] is the server address
+	 * argv[1] is the server port
+	 * argv[2] is the file name
 	 */
 
-	/* get basename of a file */
-	basename = get_basename(filename);
-	if (strlen(basename) == 0) {
-		fprintf(stderr, "File/path invalid\n");
-		is_error = TRUE;
-		goto cleanup;
+	if (argc != 3) {
+		errno = EINVAL;
+		PERROR("run_client()");
+		print_help();
+
+		return EINVAL;
 	}
 
-	strncpy(packet_data->filename, basename, sizeof(packet_data->filename));
-	packet_data->filename_len = (uint8_t)strlen(basename);
-	packet_data->file_size = (uint64_t)s_file.st_size;
+	struct client client = {
+		.addr      = argv[0],
+		.port      = argv[1],
+		.file_path = argv[2]
+	};
 
-	/* print file properties */
-	puts("\nFile info: ");
-	printf(" -> File name\t\t: %s\n", packet_data->filename);
-	printf(" -> File name length:\t: %d\n", packet_data->filename_len);
-	printf(" -> File size\t\t: %zu bytes\n", packet_data->file_size);
-	printf(" -> Send to\t\t: %s:%d\n", address, port);
+	set_signal(); /* see: ftransfer.c */
+	set_file_prop(&client);
 
-	/* Create socket */
-	client_fd = socket(AF_INET, SOCK_STREAM, 0);
-	if (client_fd < 0) {
-		perror("Create socket");
-		is_error = TRUE;
-		goto cleanup;
-	}
 
-	/* TCP configuration */
-	server.sin_addr.s_addr = inet_addr(address);
-	server.sin_family = AF_INET;
-	server.sin_port = (uint16_t)htons(port);
+	printf(BOLD_YELLOW(
+		"File properties") "\n"
+		"|-> Full path   : %s\n"
+		"|-> File name   : %s\n"
+		"|-> File size   : %" PRIu64 " bytes\n"
+		"|-> Destination : %s (%s)\n"
+		"`-> Buffer size : %u bytes\n\n",
+		client.file_path, client.pkt.prop.file_name, client.file_size,
+		client.addr, client.port, BUFFER_SIZE
+	);
 
-	/* let's connect to server, yay! */
-	if (connect(client_fd, (struct sockaddr*)&server,
-			sizeof(server)) < 0) {
-		perror("Connect to server");
-		is_error = TRUE;
-		goto cleanup;
-	}
 
-	/* send file properties */
-	send_bytes = send(client_fd, packet_data, BUFFER_SIZE, 0);
-	if (send_bytes < 0) {
-		perror("Send data");
-		is_error = TRUE;
-		goto cleanup;
-	}
-	send_bytes = 0; /* reset */
+	connect_to_server(&client);
+	send_file_prop(&client);
+	send_file(&client);
 
-	/* reallocation memory size */
-	data_arena_tmp = realloc(data_arena, sizeof(packet) + packet_data->file_size);
-	if (data_arena_tmp == NULL) {
-		perror("Allocation data_arena_tmp");
-		is_error = TRUE;
-		goto cleanup;
-	}
-
-	data_arena = data_arena_tmp;
-	packet_data = (packet*)data_arena;
-
-	puts("\nSending file...");
-
-	/* openning file target */
-	file_fd = open(filename, O_RDONLY, 0);
-	if (file_fd < 0) {
-		perror("Open file");
-		is_error = TRUE;
-		goto cleanup;
-	}
-
-	/* send file to server */
-	while (sent_bytes < (packet_data->file_size)) {
-		/* read bytes from file */
-		read_bytes = read(file_fd, packet_data->content, READ_FILE_BUF);
-		if (read_bytes < 0) {
-			perror("Read file");
-			is_error = TRUE;
-			break;
-		}
-
-		/* send bytes data to server */
-		send_bytes = send(client_fd, packet_data->content, (size_t)read_bytes, 0);
-		if (send_bytes < 0) {
-			perror("Send file");
-			is_error = TRUE;
-			break;
-		}
-		sent_bytes += (size_t)read_bytes;
-
-		/*
-		printf("Sent bytes: %lu\n", sent_bytes);
-		usleep(800);
-		*/
-	}
-
-cleanup:
-	free(basename);
-	free(data_arena);
-	if (client_fd > 0)
-		close(client_fd);
-	if (file_fd > 0)
-		close(file_fd);
-	if (is_error == TRUE) {
-		puts("\nFailed :( \n");
-		return EXIT_FAILURE;
-	}
-	puts("\nDone, uWu :3\n");
+	INFO("Done!\n");
 
 	return EXIT_SUCCESS;
-}
-
-/* function for generate basename of a file */
-/* because we need 'real' filename not fullpath */
-static char *
-get_basename(const char *path)
-{
-	char *str = strrchr(path, '/');
-	if (str == NULL)
-		return strdup(path);
-
-	return strdup(str +1);
 }
